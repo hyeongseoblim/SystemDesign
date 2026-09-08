@@ -1,4 +1,6 @@
-import { getCard, AREA_LABELS, MODE_LABELS, stripMd } from "@/lib/api";
+import { getCard, CardFetchError, AREA_LABELS, MODE_LABELS, stripMd } from "@/lib/api";
+import { headings } from "@/lib/reading";
+import answerGuides from "@/content/answer-guides.json";
 import CardBody from "@/components/CardBody";
 import QuestionAnswers from "@/components/QuestionAnswers";
 import DifficultyDots from "@/components/DifficultyDots";
@@ -13,7 +15,7 @@ export default async function CardPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ area?: string; mode?: string; difficulty?: string }>;
+  searchParams: Promise<{ area?: string; mode?: string; difficulty?: string; returnTo?: string }>;
 }) {
   const { id } = await params;
   const origin = await searchParams;
@@ -21,8 +23,9 @@ export default async function CardPage({
   let card;
   try {
     card = await getCard(id);
-  } catch {
-    notFound();
+  } catch (error) {
+    if (error instanceof CardFetchError && error.status === 404) notFound();
+    throw error;
   }
 
   const published = card.publishedAt
@@ -44,13 +47,16 @@ export default async function CardPage({
     backParams.set("difficulty", origin.difficulty!);
   }
   const backQuery = backParams.toString();
-  const backHref = backQuery ? `/?${backQuery}` : "/";
+  const fallbackHref = backQuery ? `/?${backQuery}` : "/";
+  const backHref = origin.returnTo === "/" || origin.returnTo?.startsWith("/?") ? origin.returnTo : fallbackHref;
+  const outline = headings(card.contentMd);
+  const guide = (answerGuides as Record<string, typeof answerGuides[keyof typeof answerGuides]>)[card.slug];
   const hasQuestions = card.questions.length > 0;
   const completionStep = hasQuestions ? 3 : 2;
 
   return (
     <article className={`detail a-${card.area}`}>
-      <ReadingProgress />
+      <ReadingProgress cardId={card.id} />
       <Link href={backHref} className="back">
         ← 피드로
       </Link>
@@ -75,13 +81,17 @@ export default async function CardPage({
       <nav className="study-roadmap" aria-label="이 카드 학습 순서">
         <span className="roadmap-title">학습 순서</span>
         <ol className={hasQuestions ? undefined : "two-steps"}>
-          <li><b>1</b><span>핵심 내용 읽기</span></li>
-          {hasQuestions && <li><b>2</b><span>질문 {card.questions.length}개 답하기</span></li>}
-          <li><b>{completionStep}</b><span>완료 후 복습하기</span></li>
+          <li><b>1</b><a href="#reading">핵심 내용 읽기</a></li>
+          {hasQuestions && <li><b>2</b><a href="#questions">질문 {card.questions.length}개 답하기</a></li>}
+          <li><b>{completionStep}</b><a href="#complete">이해도 기록하기</a></li>
         </ol>
       </nav>
 
-      <section className="study-section">
+      {outline.length > 0 && <details className="reading-outline">
+        <summary>목차 · {outline.length}개 섹션</summary>
+        <nav aria-label="본문 목차"><ol>{outline.map((item) => <li key={item.id}><a href={`#${item.id}`}>{item.title}</a></li>)}</ol></nav>
+      </details>}
+      <section id="reading" className="study-section">
         <div className="study-section-head">
           <span>STEP 1</span>
           <div>
@@ -91,7 +101,7 @@ export default async function CardPage({
         </div>
         <CardBody md={card.contentMd} />
       </section>
-      <QuestionAnswers cardId={card.id} questions={card.questions} />
+      <QuestionAnswers cardId={card.id} questions={card.questions} guide={guide} />
       <LearnActions cardId={card.id} step={completionStep} />
       <StartInterviewFromCard
         cardId={card.id}

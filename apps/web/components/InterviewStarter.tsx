@@ -105,7 +105,7 @@ export default function InterviewStarter({
             key={a}
             type="button"
             className={`chip a-${a} ${area === a ? "on" : ""}`}
-            onClick={() => setArea(a)}
+            onClick={() => { setArea(a); setPrompt(""); setCopied(false); }}
           >
             {AREA_LABELS[a]}
           </button>
@@ -121,7 +121,7 @@ export default function InterviewStarter({
         rows={2}
         placeholder="예: 쿠팡 로켓배송 라스트마일 배차 시스템 설계"
         value={topic}
-        onChange={(e) => setTopic(e.target.value)}
+        onChange={(e) => { setTopic(e.target.value); setPrompt(""); setCopied(false); }}
       />
       <div className="chips suggestions">
         {SUGGESTIONS[area].map((s) => (
@@ -129,7 +129,7 @@ export default function InterviewStarter({
             key={s}
             type="button"
             className="chip ghost"
-            onClick={() => setTopic(s)}
+            onClick={() => { setTopic(s); setPrompt(""); setCopied(false); }}
           >
             {s}
           </button>
@@ -143,7 +143,7 @@ export default function InterviewStarter({
             key={d.level}
             type="button"
             className={`chip ${difficulty === d.level ? "on" : ""}`}
-            onClick={() => setDifficulty(d.level)}
+            onClick={() => { setDifficulty(d.level); setPrompt(""); setCopied(false); }}
           >
             {d.level} · {d.label}
           </button>

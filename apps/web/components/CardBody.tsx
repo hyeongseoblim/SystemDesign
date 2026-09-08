@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import rehypeHighlight from "rehype-highlight";
+import { sectionId } from "@/lib/reading";
 import type { ReactNode } from "react";
 
 /** React 노드 트리에서 텍스트만 평탄화 (callout 분류용) */
@@ -85,6 +86,7 @@ export default function CardBody({ md: rawMd }: { md: string }) {
         remarkPlugins={[remarkGfm, remarkCjkFriendly]}
         rehypePlugins={[rehypeHighlight]}
         components={{
+          h2({ children }) { return <h2 id={sectionId(flatText(children))}>{children}</h2>; },
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className ?? "");
             if (match?.[1] === "mermaid") {

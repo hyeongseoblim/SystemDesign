@@ -944,3 +944,36 @@ button { font-family: inherit; }
   .handoff-actions .ghost-btn,
   .handoff-actions .primary-btn { width: 100%; }
 }
+
+/* 검색 → 회상 → 약점 복습 */
+.study-search { margin: 22px 0 16px; }
+.study-search > label { display: block; color: var(--text-strong); font-size: 18px; font-weight: 750; margin-bottom: 8px; }
+.study-search input[type="search"] { width: 100%; min-height: 48px; padding: 12px 14px; background: var(--card); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: 16px; }
+.study-filter-chips, .mastery-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.study-filter-chips .chip, .mastery-options .chip, .feed-tools .chip { min-height: 44px; }
+.study-shortcuts { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.study-shortcuts > a, .study-shortcuts > button { flex: 1 1 240px; text-align: left; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
+.study-shortcuts strong { display: block; color: var(--accent); }
+.catalog-status { padding: 12px; margin: 12px 0; color: var(--muted); background: var(--card); border-radius: var(--radius-sm); }
+.study-state.review { color: var(--co-warn); background: color-mix(in srgb, var(--co-warn) 10%, transparent); }
+.reading-outline { padding: 14px 18px; margin: 20px 0; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.reading-outline summary, .answer-guide summary { cursor: pointer; color: var(--text-strong); font-weight: 650; padding: 6px 0; }
+.reading-outline ol { padding-left: 22px; margin-top: 8px; }
+.reading-outline a { display: inline-block; padding: 6px 0; }
+.study-roadmap a { text-decoration: underline; text-underline-offset: 4px; }
+#reading, #questions, #complete, .content h2[id] { scroll-margin-top: 24px; }
+.resume-reading { display: block; margin: 12px 0; min-height: 44px; }
+.answer-guide { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 10px; }
+.answer-guide p { margin: 10px 0; font-size: 14px; }
+.answer-guide p > strong { color: var(--accent); }
+.guide-checklist { display: grid; gap: 10px; margin: 14px 0; }
+.guide-checklist label { display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: var(--bg); border-radius: 8px; font-size: 14px; cursor: pointer; }
+.guide-checklist input { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 4px; accent-color: var(--accent); }
+.guide-sources { color: var(--muted); font-size: 13px; margin: 16px 0; }
+.guide-sources ul { padding-left: 18px; }
+.guide-sources a { text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 520px) {
+  .feed-tools { flex-wrap: wrap; }
+  .study-overview { flex-wrap: wrap; }
+  .mastery-options .chip { width: 100%; text-align: left; }
+}

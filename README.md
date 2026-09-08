@@ -93,6 +93,8 @@ docker compose up -d
 
 자세한 내용은 [apps/api/README.md](apps/api/README.md), [apps/web/README.md](apps/web/README.md), [infra/README.md](infra/README.md) 참고.
 
+검색·약점 복습·질문 점검 기준의 사용 흐름과 검증 방법은 [학습 경험 개선](docs/study-experience.md)을 참고한다.
+
 카드 확장 목표, 중복 방지 모델, 작성·검수 절차는 [콘텐츠 확장 설계](docs/content-expansion-plan.md)를 따른다.
 
 ## 라이선스

@@ -7,6 +7,7 @@ import {
   LearningMode,
   DifficultyLevel,
 } from "@/lib/api";
+import FeedFilterLink from "@/components/FeedFilterLink";
 import CardFeed from "@/components/CardFeed";
 import ActiveTabScroller from "@/components/ActiveTabScroller";
 import Link from "next/link";
@@ -41,7 +42,6 @@ export default async function Home({
   const activeDifficulty = DIFFICULTIES.includes(parsedDifficulty as DifficultyLevel)
     ? (parsedDifficulty as DifficultyLevel)
     : undefined;
-  const shuffleSeed = Math.floor(Math.random() * 2_147_483_647);
 
   let initial;
   let error: string | null = null;
@@ -50,7 +50,6 @@ export default async function Home({
       area: activeArea,
       mode: activeMode,
       difficulty: activeDifficulty,
-      shuffleSeed,
       limit: 20,
     });
   } catch (e) {
@@ -80,22 +79,22 @@ export default async function Home({
               <span>카테고리</span>
             </div>
             <nav className="tabs" aria-label="카테고리 필터">
-              <Link
+              <FeedFilterLink
                 className={`tab t-all ${!activeArea ? "active" : ""}`}
                 href={feedHref(undefined, activeMode, activeDifficulty)}
                 aria-current={!activeArea ? "page" : undefined}
               >
                 전체
-              </Link>
+              </FeedFilterLink>
               {AREAS.map((a) => (
-                <Link
+                <FeedFilterLink
                   key={a}
                   className={`tab a-${a} ${activeArea === a ? "active" : ""}`}
                   href={feedHref(a, activeMode, activeDifficulty)}
                   aria-current={activeArea === a ? "page" : undefined}
                 >
                   {AREA_LABELS[a]}
-                </Link>
+                </FeedFilterLink>
               ))}
             </nav>
           </div>
@@ -104,22 +103,22 @@ export default async function Home({
               <span>학습 모드</span>
             </div>
             <nav className="tabs sub" aria-label="학습 모드 필터">
-              <Link
+              <FeedFilterLink
                 className={`tab ${!activeMode ? "active" : ""}`}
                 href={feedHref(activeArea, undefined, activeDifficulty)}
                 aria-current={!activeMode ? "page" : undefined}
               >
                 모든 모드
-              </Link>
+              </FeedFilterLink>
               {MODES.map((m) => (
-                <Link
+                <FeedFilterLink
                   key={m}
                   className={`tab ${activeMode === m ? "active" : ""}`}
                   href={feedHref(activeArea, m, activeDifficulty)}
                   aria-current={activeMode === m ? "page" : undefined}
                 >
                   {MODE_LABELS[m]}
-                </Link>
+                </FeedFilterLink>
               ))}
             </nav>
           </div>
@@ -128,22 +127,22 @@ export default async function Home({
               <span>난이도</span>
             </div>
             <nav className="tabs sub" aria-label="난이도 필터">
-              <Link
+              <FeedFilterLink
                 className={`tab ${!activeDifficulty ? "active" : ""}`}
                 href={feedHref(activeArea, activeMode, undefined)}
                 aria-current={!activeDifficulty ? "page" : undefined}
               >
                 전체 난이도
-              </Link>
+              </FeedFilterLink>
               {DIFFICULTIES.map((level) => (
-                <Link
+                <FeedFilterLink
                   key={level}
                   className={`tab ${activeDifficulty === level ? "active" : ""}`}
                   href={feedHref(activeArea, activeMode, level)}
                   aria-current={activeDifficulty === level ? "page" : undefined}
                 >
                   {DIFFICULTY_LABELS[level]}
-                </Link>
+                </FeedFilterLink>
               ))}
             </nav>
           </div>
@@ -156,9 +155,10 @@ export default async function Home({
       {error ? (
         <p className="empty">
           <span className="glyph">📡</span>
-          API에 연결할 수 없습니다.
+          카드를 불러오지 못했어요.
           <br />
-          백엔드가 실행 중인지 확인하세요.
+          잠시 후 다시 시도해 주세요.
+          <a className="loadmore" href={feedHref(activeArea, activeMode, activeDifficulty)}>다시 시도</a>
         </p>
       ) : (
         <CardFeed
@@ -167,7 +167,6 @@ export default async function Home({
           area={activeArea}
           mode={activeMode}
           difficulty={activeDifficulty}
-          shuffleSeed={shuffleSeed}
         />
       )}
     </>

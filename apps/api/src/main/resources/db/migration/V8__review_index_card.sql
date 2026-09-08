@@ -1,23 +1,8 @@
----
-area: DATABASE
-mode: CONCEPT
-coach: database-coach
-title: "B-Tree 인덱스와 EXPLAIN 실행계획 읽기"
-slug: database-01-index-explain
-difficulty: 3
-summary: "B+Tree 구조, 복합 인덱스 선두 컬럼 원칙, 커버링 인덱스, EXPLAIN 실행계획 읽기, 인덱스가 안 타는 8가지 경우까지 — 쿼리 성능의 첫 번째 도구를 정리한다."
-tags:
-  - "B-Tree"
-  - "인덱스"
-  - "EXPLAIN"
-  - "실행계획"
-  - "커버링 인덱스"
-questions:
-  - "`orders(warehouse_id, status, created_at)` 복합 인덱스가 있을 때, `WHERE status='PAID' AND created_at > ?` 쿼리는 이 인덱스를 어떻게 활용(또는 못)하나요? 더 나은 인덱스 설계를 제안하고, 선택도 관점에서 근거를 대보세요."
-  - "운송장 추적 API가 `SELECT status, eta FROM waybill WHERE tracking_no=?`를 초당 수만 번 호출합니다. 커버링 인덱스를 적용했을 때 I/O 관점에서 무엇이 달라지는지, 그리고 그 대가(쓰기/저장 비용)는 무엇인지 설명하세요. EXPLAIN에서 무엇을 확인하면 되나요?"
-  - "\"인덱스를 분명히 만들었는데 EXPLAIN type이 ALL(풀스캔)로 나옵니다.\" 가능한 원인을 4가지 이상 들고, 각각 어떻게 진단·교정할지 설명하세요. PostgreSQL이라면 estimated vs actual rows를 어떻게 활용하나요?"
----
-> **검수 기준 — 2026-09-08**
+-- 검수된 수동 인덱스 카드의 본문만 갱신한다.
+-- 카드/질문 ID, 질문 문구, 발행일을 유지하므로 기존 로컬 학습 기록은 보존된다.
+-- 신규 DB에서는 아직 카드가 없으므로 이후 ContentSeeder가 동일 본문을 적재한다.
+UPDATE cards
+SET content_md = $card_body$> **검수 기준 — 2026-09-08**
 >
 > MySQL InnoDB 8.4와 PostgreSQL 17을 기준으로 일반 원리와 예외를 구분한다. 실행계획·성능 수치는 예시이며 데이터 분포와 설정으로 달라진다.
 > 참고: [PostgreSQL 복합 인덱스](https://www.postgresql.org/docs/17/indexes-multicolumn.html), [Index-Only Scan](https://www.postgresql.org/docs/17/indexes-index-only-scans.html), [플래너 통계](https://www.postgresql.org/docs/17/planner-stats.html), [MySQL ICP](https://dev.mysql.com/doc/refman/8.4/en/index-condition-pushdown-optimization.html).
@@ -247,4 +232,5 @@ SELECT * FROM orders WHERE warehouse_id = 1 AND status = 'PAID';
 
 ## 이해도 확인 Q&A
 
-아래 질문에 직접 답변을 작성하세요. 자동 저장되며, 버튼으로 복사해 코치에게 피드백을 요청할 수 있습니다.
+아래 질문에 직접 답변을 작성하세요. 자동 저장되며, 버튼으로 복사해 코치에게 피드백을 요청할 수 있습니다.$card_body$
+WHERE slug = 'database-01-index-explain' AND source = 'MANUAL';

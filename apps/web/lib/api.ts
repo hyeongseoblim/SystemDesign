@@ -119,11 +119,15 @@ export async function getFeed(params: {
   return res.json();
 }
 
+export class CardFetchError extends Error {
+  constructor(public status: number) { super(`card failed: ${status}`); }
+}
+
 export async function getCard(id: string): Promise<CardDetail> {
   const res = await fetch(`${API_BASE}/api/v1/cards/${id}`, {
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`card failed: ${res.status}`);
+  if (!res.ok) throw new CardFetchError(res.status);
   return res.json();
 }
 
