@@ -125,6 +125,14 @@ gcloud run deploy "$SERVICE" \
   --set-env-vars="^@^DB_URL=$DB_URL@DB_USER=$DB_USER@CORS_ORIGINS=$CORS_ORIGINS@GEN_ENABLED=false@INTERVIEW_ENABLED=false@GEN_DAILY_CARDS=${GEN_DAILY_CARDS:-1}@GEN_DAILY_TOKENS=${GEN_DAILY_TOKENS:-50000}@INTERVIEW_MAX_TURNS=${INTERVIEW_MAX_TURNS:-20}@INTERVIEW_DAILY_TOKENS=${INTERVIEW_DAILY_TOKENS:-100000}@JAVA_OPTS=-XX:MaxRAMPercentage=60 -XX:+UseSerialGC -Xss512k -XX:MaxMetaspaceSize=192m" \
   --set-secrets="DB_PASSWORD=jobstudy-db-password:latest,ADMIN_TOKEN=jobstudy-admin-token:latest${ANTHROPIC_SECRET}"
 
+# `--max-instances`는 리비전 상한이다. 서비스 전체 상한은 별도 설정으로
+# 유지해야 트래픽을 여러 리비전에 나누거나 다음 배포를 해도 비용 보호가 남는다.
+gcloud run services update "$SERVICE" \
+  --region="$GCP_REGION" \
+  --min=0 \
+  --max=1 \
+  --quiet >/dev/null
+
 SERVICE_URL="$(gcloud run services describe "$SERVICE" --region="$GCP_REGION" --format='value(status.url)')"
 echo "==> 헬스 체크: $SERVICE_URL/api/v1/health"
 curl --fail --show-error --retry 8 --retry-delay 5 "$SERVICE_URL/api/v1/health"
