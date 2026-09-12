@@ -11,6 +11,7 @@ import FeedFilterLink from "@/components/FeedFilterLink";
 import CardFeed from "@/components/CardFeed";
 import ActiveTabScroller from "@/components/ActiveTabScroller";
 import Link from "next/link";
+import FilterSheet from "@/components/FilterSheet";
 
 const AREAS = Object.keys(AREA_LABELS) as TopicArea[];
 const MODES = Object.keys(MODE_LABELS) as LearningMode[];
@@ -18,7 +19,7 @@ const MODES = Object.keys(MODE_LABELS) as LearningMode[];
 const DIFFICULTIES = [3, 4, 5] as DifficultyLevel[];
 
 function feedHref(area?: TopicArea, mode?: LearningMode, difficulty?: DifficultyLevel) {
-  const q = new URLSearchParams();
+  const q = new URLSearchParams({ view: "explore" });
   if (area) q.set("area", area);
   if (mode) q.set("mode", mode);
   if (difficulty) q.set("difficulty", String(difficulty));
@@ -29,9 +30,10 @@ function feedHref(area?: TopicArea, mode?: LearningMode, difficulty?: Difficulty
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ area?: string; mode?: string; difficulty?: string }>;
+  searchParams: Promise<{ area?: string; mode?: string; difficulty?: string; view?: string; study?: string; q?: string }>;
 }) {
-  const { area, mode, difficulty } = await searchParams;
+  const { area, mode, difficulty, view, study, q } = await searchParams;
+  const activeView = view === "review" ? "review" : view === "explore" || area || mode || difficulty || study || q ? "explore" : "home";
   const activeArea = AREAS.includes(area as TopicArea)
     ? (area as TopicArea)
     : undefined;
@@ -73,6 +75,7 @@ export default async function Home({
             AI 면접
           </Link>
         </div>
+        {activeView === "explore" && <FilterSheet>
         <div className="filter-panel" aria-label="학습 카드 필터">
           <div className="filter-group">
             <div className="filter-heading">
@@ -150,6 +153,7 @@ export default async function Home({
         <ActiveTabScroller
           filterKey={`${activeArea ?? "ALL"}:${activeMode ?? "ALL"}:${activeDifficulty ?? "ALL"}`}
         />
+        </FilterSheet>}
       </header>
 
       {error ? (
@@ -158,11 +162,12 @@ export default async function Home({
           카드를 불러오지 못했어요.
           <br />
           잠시 후 다시 시도해 주세요.
-          <a className="loadmore" href={feedHref(activeArea, activeMode, activeDifficulty)}>다시 시도</a>
+          <a className="loadmore" href={activeView === "explore" ? feedHref(activeArea, activeMode, activeDifficulty) : activeView === "review" ? "/?view=review" : "/"}>다시 시도</a>
         </p>
       ) : (
         <CardFeed
-          key={`${activeArea ?? "ALL"}:${activeMode ?? "ALL"}:${activeDifficulty ?? "ALL"}`}
+          key={`${activeView}:${activeArea ?? "ALL"}:${activeMode ?? "ALL"}:${activeDifficulty ?? "ALL"}`}
+          view={activeView}
           initial={initial}
           area={activeArea}
           mode={activeMode}

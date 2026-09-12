@@ -9,7 +9,8 @@ import { matchesSearch, matchesStudy, needsReview, readStudy, shuffleRank, STUDY
   StudyFilter, StudyRecord } from "@/lib/study";
 import DifficultyDots from "@/components/DifficultyDots";
 
-export default function CardFeed({ initial, area, mode, difficulty }: {
+export default function CardFeed({ initial, area, mode, difficulty, view = "explore" }: {
+  view?: "home" | "explore" | "review";
   initial: FeedResponse; area?: TopicArea; mode?: LearningMode; difficulty?: DifficultyLevel;
 }) {
   const searchParams = useSearchParams();
@@ -31,7 +32,7 @@ export default function CardFeed({ initial, area, mode, difficulty }: {
     function restoreOptions() {
       const params = new URLSearchParams(searchString);
       setQuery(params.get("q") ?? "");
-      const state = params.get("study") ?? "all";
+      const state = view === "review" ? "review" : params.get("study") ?? "all";
       setFilter(Object.hasOwn(STUDY_LABELS, state) ? state as StudyFilter : "all");
       const random = Number(params.get("random"));
       setSeed(Number.isSafeInteger(random) && random > 0 ? random : null);
@@ -40,7 +41,7 @@ export default function CardFeed({ initial, area, mode, difficulty }: {
       setReady(true);
     }
     restoreOptions();
-  }, [searchString]);
+  }, [searchString, view]);
 
   // 요약만 가져온다. 첫 페이지 밖의 카드도 검색·학습 상태 필터에 포함한다.
   useEffect(() => {
@@ -117,6 +118,7 @@ export default function CardFeed({ initial, area, mode, difficulty }: {
   const reading = items.filter((card) => records[card.id]?.read && !records[card.id]?.done)
     .sort((a, b) => (records[b.id]?.read ?? "").localeCompare(records[a.id]?.read ?? ""))[0];
   const params = new URLSearchParams();
+  if (view !== "home") params.set("view", view);
   if (area) params.set("area", area);
   if (mode) params.set("mode", mode);
   if (difficulty) params.set("difficulty", String(difficulty));
@@ -132,25 +134,39 @@ export default function CardFeed({ initial, area, mode, difficulty }: {
 
   return (
     <>
-      <section className="study-search" aria-label="카드 검색과 학습 상태">
-        <label htmlFor="card-search">무엇을 공부할까요?</label>
+      {view === "home" && <section className="home-welcome">
+        <span className="eyebrow">조금씩, 꾸준히 쌓는 실력</span>
+        <h2>오늘도 한 걸음<br />성장해 볼까요?</h2>
+        <p>개념을 읽고, 내 언어로 설명하는 기술 학습.</p>
+        <Link className="home-primary" href={reading ? cardHref(reading.id) : "/?view=explore"} onClick={rememberPosition}>
+          {reading ? "이어서 공부하기" : "공부할 카드 찾기"}<span aria-hidden="true">↗</span>
+        </Link>
+        {ready && reading && <p className="resume-title">{reading.title}</p>}
+        <div className="home-stats">
+          <Link href="/?view=explore&study=complete"><strong>{ready ? `${completeCount}${loading || error ? "+" : ""}` : "—"}</strong><span>학습 완료</span></Link>
+          <Link href="/?view=review"><strong>{ready ? `${reviewCount}${loading || error ? "+" : ""}` : "—"}</strong><span>복습할 카드</span></Link>
+        </div>
+      </section>}
+      {view === "review" && <section className="screen-intro"><span className="eyebrow">내 것으로 만드는 시간</span><h2>한 번 더, 확실하게</h2><p>다시 공부하고 싶거나 힌트가 필요했던 카드를 모았어요.</p></section>}
+      {view !== "home" && <section className="study-search" aria-label="카드 검색과 학습 상태">
+        <label htmlFor="card-search">{view === "review" ? "복습 카드 검색" : "무엇을 공부할까요?"}</label>
         <input id="card-search" type="search" placeholder="제목·태그·요약 검색 (예: 인덱스, Kafka)"
           value={query} onChange={(e) => updateOptions({ query: e.target.value })} disabled={!ready} />
-        <div className="study-filter-chips" role="group" aria-label="학습 상태">
+        {view === "explore" && <div className="study-filter-chips" role="group" aria-label="학습 상태">
           {(Object.keys(STUDY_LABELS) as StudyFilter[]).map((state) => (
             <button key={state} className={`chip ${filter === state ? "on" : ""}`} aria-pressed={filter === state}
               onClick={() => updateOptions({ filter: state })} disabled={!ready}>{STUDY_LABELS[state]}</button>
           ))}
-        </div>
+        </div>}
         <p className="hint">학습 기록은 이 브라우저에 저장됩니다. 복습 필요에는 ‘힌트 필요’도 포함됩니다.</p>
-      </section>
-      {ready && (reading || reviewCount > 0) && (
+      </section>}
+      {view === "explore" && ready && (reading || reviewCount > 0) && (
         <div className="study-shortcuts">
           {reading && <Link href={cardHref(reading.id)} onClick={rememberPosition}>이어서 공부하기 → <strong>{reading.title}</strong></Link>}
           {reviewCount > 0 && <button onClick={() => updateOptions({ filter: "review", query: "" })}>복습할 카드 <strong>{reviewCount}개</strong></button>}
         </div>
       )}
-      <div className="feed-toolbar">
+      {view !== "home" && <><div className="feed-toolbar">
         <div className="feed-context">
           <span>학습 카드 · {seed === null ? "최신순" : "랜덤 순서"}</span>
           <strong>{area ? AREA_LABELS[area] : "전체 카테고리"} · {mode ? MODE_LABELS[mode] : "모든 모드"} · {difficulty ? DIFFICULTY_LABELS[difficulty] : "모든 난이도"}</strong>
@@ -159,21 +175,24 @@ export default function CardFeed({ initial, area, mode, difficulty }: {
           <button className="chip" onClick={() => updateOptions({ seed: seed === null ? Math.floor(Math.random() * 2147483646) + 1 : null })} disabled={!ready}>
             {seed === null ? "랜덤으로 골라보기" : "최신순으로 보기"}
           </button>
-          {(area || mode || difficulty || query || filter !== "all") && <Link href="/" className="reset-filter">전체 초기화</Link>}
+          {(area || mode || difficulty || query || filter !== "all") && <Link href={view === "review" ? "/?view=review" : "/?view=explore"} className="reset-filter">전체 초기화</Link>}
         </div>
       </div>
       <div className="study-overview" aria-live="polite">
         <span>{loading || error ? `불러온 ${items.length}개 중` : `현재 카테고리·모드·난이도 ${items.length}개 중`} 검색 결과 <strong>{ready ? filtered.length : "…"}개</strong></span>
         <span>완료 <strong>{ready ? completeCount : "…"}개</strong></span>
       </div>
+      </>}
+      {view === "home" && <div className="home-section-title"><h2>새롭게 공부해 보세요</h2><Link href="/?view=explore">전체 보기 →</Link></div>}
       {loading && <p className="catalog-status" role="status">전체 목록을 확인하고 있어요. 검색 결과가 더 추가될 수 있습니다.</p>}
       {error && <div className="catalog-status" role="alert">일부 카드를 불러오지 못했어요. 현재 결과는 전체가 아닙니다. <button className="chip" onClick={() => setRetry((v) => v + 1)}>다시 시도</button></div>}
       {ready && filtered.length === 0 && !loading && (
-        <div className="empty"><strong>{error ? "불러온 카드 중에는 일치하는 카드가 없어요." : "조건에 맞는 학습 카드가 없어요."}</strong>
-          <p>검색어나 학습 상태를 바꿔 보세요.</p><button className="chip" onClick={() => updateOptions({ query: "", filter: "all" })}>검색·학습 상태 초기화</button></div>
+        <div className="empty"><strong>{error ? "불러온 카드 중에는 일치하는 카드가 없어요." : (view === "review" ? "지금은 복습할 카드가 없어요." : "조건에 맞는 학습 카드가 없어요.")}</strong>
+          <p>{view === "review" ? "학습 후 이해도를 기록하면 여기에 모아드려요." : "검색어나 학습 상태를 바꿔 보세요."}</p><button className="chip" onClick={() => updateOptions({ query: "", filter: view === "review" ? "review" : "all" })}>검색·학습 상태 초기화</button></div>
       )}
-      <div className="feed" aria-busy={loading}>
-        {(ready ? filtered : items).slice(0, visible).map((c) => {
+      {view === "review" && !ready && <p className="catalog-status" role="status">복습 기록을 확인하고 있어요.</p>}
+      <div className="feed" aria-busy={loading || !ready}>
+        {(ready ? filtered : view === "review" ? [] : items).slice(0, view === "home" ? 4 : visible).map((c) => {
           const record = records[c.id] ?? {};
           const isRead = !!record.read;
           const isDone = !!record.done;
@@ -196,7 +215,7 @@ export default function CardFeed({ initial, area, mode, difficulty }: {
           );
         })}
       </div>
-      {filtered.length > visible && <button className="loadmore" onClick={() => updateOptions({ visible: visible + 20 })}>20개 더 보기 · {Math.min(visible, filtered.length)}/{filtered.length}개 표시</button>}
+      {view !== "home" && filtered.length > visible && <button className="loadmore" onClick={() => updateOptions({ visible: visible + 20 })}>20개 더 보기 · {Math.min(visible, filtered.length)}/{filtered.length}개 표시</button>}
     </>
   );
 }

@@ -57,8 +57,12 @@ export default async function CardPage({
   return (
     <article className={`detail a-${card.area}`}>
       <ReadingProgress cardId={card.id} />
+      <nav className="reading-dock" aria-label="학습 바로가기">
+        <Link href={backHref}>← 목록</Link>
+        <a href={hasQuestions ? "#questions" : "#complete"}>{hasQuestions ? "질문 풀기" : "이해도 기록하기"} →</a>
+      </nav>
       <Link href={backHref} className="back">
-        ← 피드로
+        ← 목록으로
       </Link>
       <header className="detail-hero">
         <div className="meta">

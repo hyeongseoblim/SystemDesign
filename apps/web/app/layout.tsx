@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { Suspense } from "react";
+import AppNavigation from "@/components/AppNavigation";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
@@ -28,6 +30,7 @@ export default function RootLayout({
     <html lang="ko">
       <body>
         <div className="app">{children}</div>
+        <Suspense fallback={null}><AppNavigation /></Suspense>
         <ServiceWorkerRegister />
       </body>
     </html>
