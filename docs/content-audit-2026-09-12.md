@@ -158,10 +158,10 @@ PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시�
 | [backend-15-file-streaming-design](../apps/api/src/main/resources/content/backend-15-file-streaming-design.md) | DESIGN · 4 | 1,047 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
 | [backend-architecture-01-msa-vs-monolith](../apps/api/src/main/resources/content/backend-architecture-01-msa-vs-monolith.md) | CONCEPT · 3 | 4,416 | 심층 보강 | 논리/물리 DB·가용성 독립 가정·p99·쓰기 전환과 롤백 |
 | [backend-architecture-02-ddd](../apps/api/src/main/resources/content/backend-architecture-02-ddd.md) | CONCEPT · 3 | 7,025 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 |
-| [backend-architecture-03-event-driven](../apps/api/src/main/resources/content/backend-architecture-03-event-driven.md) | CONCEPT · 3 | 4,183 | 심층 보강 | 스키마 호환 방향·흐름 소유권·Delta/Snapshot·버전 누락과 재처리 |
+| [backend-architecture-03-event-driven](../apps/api/src/main/resources/content/backend-architecture-03-event-driven.md) | CONCEPT · 3 | 4,204 | 심층 보강 | 스키마 호환 방향·흐름 소유권·Delta/Snapshot·버전 누락과 재처리 |
 | [backend-architecture-04-saga](../apps/api/src/main/resources/content/backend-architecture-04-saga.md) | CONCEPT · 4 | 5,569 | 심층 보강 | 2PC 경계·Pivot·외부 결제 명령·상태/Outbox 원자성 |
 | [backend-architecture-05-cqrs-event-sourcing](../apps/api/src/main/resources/content/backend-architecture-05-cqrs-event-sourcing.md) | CONCEPT · 4 | 5,712 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 / 기업 언급 출처 확인 |
-| [backend-architecture-06-outbox-idempotency](../apps/api/src/main/resources/content/backend-architecture-06-outbox-idempotency.md) | CONCEPT · 4 | 4,238 | 심층 보강 | 장애 시점·eventId/파티션 키·Inbox 분기·외부 API 결과 불명 |
+| [backend-architecture-06-outbox-idempotency](../apps/api/src/main/resources/content/backend-architecture-06-outbox-idempotency.md) | CONCEPT · 4 | 4,259 | 심층 보강 | 장애 시점·eventId/파티션 키·Inbox 분기·외부 API 결과 불명 |
 | [backend-architecture-07-interview-saga](../apps/api/src/main/resources/content/backend-architecture-07-interview-saga.md) | INTERVIEW · 4 | 5,268 | 심층 보강 | 보상 미해결 관리·외부/로컬/전달 경계·집하/반품 4라운드 |
 | [backend-architecture-08-aggregate-boundary](../apps/api/src/main/resources/content/backend-architecture-08-aggregate-boundary.md) | CONCEPT · 4 | 1,948 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
 | [backend-architecture-09-aggregate-reference](../apps/api/src/main/resources/content/backend-architecture-09-aggregate-reference.md) | CONCEPT · 4 | 1,601 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
@@ -267,3 +267,5 @@ PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시�
 물리 DB 공유와 데이터 소유권, 가용성 곱셈의 독립 가정, 시간/요청 SLI, 종단 p99 추론의 한계를 정정했다. 고정 팀 수·무조건 핵심 마지막·라우팅만으로 롤백한다는 설명을 가상 조건과 데이터 이전 절차로 보강했다. 출처 없는 기업 사례를 제거했다.
 
 누적 심층 33개·부분 2개, 고유 변경 본문 35개, 해설 39개/117문항이다. V12로 후속 반영한다. 본문의 Python 계산을 실행해 99.5010%·43.71시간을 확인했고 실제 부하·장애 검증으로 계산하지 않는다.
+
+V11·V12는 `01c6099`로 운영 배포하고 DB·API·MSA 웹 응답을 확인했다. 상세 근거는 [배포 기록](deployment-2026-09-13.md)을 참고한다.
