@@ -17,186 +17,135 @@ questions:
   - "`SELECT * FROM orders WHERE status='PENDING' FOR UPDATE`를 실행했는데 다른 트랜잭션의 INSERT까지 막혔습니다. 왜 그런지 Gap/Next-key Lock으로 설명하고, status 컬럼에 인덱스가 없을 때 어떤 추가 문제가 생기는지 설명하세요."
   - "물류 주문 처리에서 한 주문이 여러 SKU 재고를 동시에 차감합니다. 두 주문이 SKU A·B를 엇갈려 잠가 데드락이 자주 발생합니다. 근본 원인과 예방책을 구체적 SQL 수준으로 제시하고, 재시도 전략의 역할도 설명하세요."
 ---
-## 1. 동시성 이상현상 3종
+## 1. 격리수준은 제품·문장·트랜잭션 경계로 설명한다
 
-격리수준은 결국 "어떤 이상현상을 허용/방지하는가"로 정의된다. 세 가지를 타임라인으로 본다.
+기준은 **MySQL 8.4 InnoDB와 PostgreSQL 17**이다. Dirty Read(미커밋 읽기), Non-repeatable Read(반복 불가 읽기), Phantom Read(팬텀 읽기)는 각각 남의 미커밋 값, 같은 행의 값 변화, 같은 조건의 결과 집합 변화를 뜻한다. 팬텀이 없다는 사실만으로 모든 실행이 직렬화 가능하다고 결론 내리지 않는다.
 
-### Dirty Read(더티 리드) — 커밋 안 된 값을 읽음
+| 격리수준 | 표준의 최소 허용 범위 | 제품에서 확인할 점 |
+|---|---|---|
+| READ UNCOMMITTED | 세 이상현상 허용 | PostgreSQL은 RC처럼 동작 |
+| READ COMMITTED, RC | 미커밋 읽기 방지 | 두 DB의 일반 읽기는 문장별 스냅샷 |
+| REPEATABLE READ, RR | 미커밋·반복 불가 읽기 방지, 팬텀 허용 가능 | 두 DB의 일반 스냅샷 읽기는 팬텀을 방지; 쓰기 의미는 다름 |
+| SERIALIZABLE | 직렬 실행과 동등한 결과 | 대기·교착·직렬화 실패의 처리까지 설계 |
 
-```mermaid
-sequenceDiagram
-    participant T1 as 트랜잭션1
-    participant DB as DB
-    participant T2 as 트랜잭션2
-    T2->>DB: UPDATE qty=500 (미커밋)
-    T1->>DB: SELECT qty → 500 읽음 (Dirty!)
-    T2->>DB: ROLLBACK
-    Note over T1: 존재한 적 없는 값을 읽음 → 잘못된 판단
-```
-
-*Dirty Read — 다른 트랜잭션의 미커밋 변경을 읽어버림*
-
-### Non-repeatable Read(반복 불가 읽기) — 같은 행이 두 번 읽을 때 달라짐
-
-```mermaid
-sequenceDiagram
-    participant T1 as 트랜잭션1
-    participant DB as DB
-    participant T2 as 트랜잭션2
-    T1->>DB: SELECT qty → 300
-    T2->>DB: UPDATE qty=500 / COMMIT
-    T1->>DB: SELECT qty → 500 (같은 행, 다른 값!)
-    Note over T1: 같은 트랜잭션 내 같은 쿼리가 다른 결과
-```
-
-*Non-repeatable Read — 한 트랜잭션 안에서 동일 행의 값이 바뀜*
-
-### Phantom Read(팬텀 리드) — 행의 집합이 달라짐
-
-```mermaid
-sequenceDiagram
-    participant T1 as 트랜잭션1
-    participant DB as DB
-    participant T2 as 트랜잭션2
-    T1->>DB: SELECT COUNT(*) WHERE age>20 → 10건
-    T2->>DB: INSERT row age=25 / COMMIT
-    T1->>DB: SELECT COUNT(*) WHERE age>20 → 11건 (Phantom!)
-    Note over T1: 없던 행(유령)이 나타남 → 범위 집계가 흔들림
-```
-
-*Phantom Read — 범위 쿼리의 결과 집합에 유령 행이 추가/삭제됨*
-
-## 2. 격리수준(Isolation Level) 4종 — DBMS별 차이가 핵심
-
-| 격리수준 | Dirty | Non-repeatable | Phantom | 기본값 |
-| --- | --- | --- | --- | --- |
-| READ UNCOMMITTED | 발생 | 발생 | 발생 | — |
-| READ COMMITTED | 방지 | 발생 | 발생 | ✅ PostgreSQL 기본 |
-| **REPEATABLE READ** | 방지 | 방지 | 표준=발생 / InnoDB=방지 | ✅ MySQL InnoDB 기본 |
-| SERIALIZABLE | 방지 | 방지 | 방지 | — |
-
-> **면접 포인트 — "RR에서 팬텀은 막히나요?" 는 함정 질문**
->
-> **표준 SQL**: REPEATABLE READ는 팬텀을 **허용**한다. **MySQL InnoDB**: RR 기본인데, **Next-key Lock(넥스트키 락)**으로 범위에 갭락을 걸어 팬텀까지 실질적으로 방지한다. 단 순수 스냅샷 읽기(일반 SELECT)는 MVCC로, 잠금 읽기(`FOR UPDATE`)는 넥스트키락으로 방지한다는 점을 구분해야 한다. **PostgreSQL**: 기본은 READ COMMITTED. RR은 스냅샷 격리로 팬텀 방지. SERIALIZABLE은 **SSI(Serializable Snapshot Isolation)**로 직렬성 위반을 감지해 트랜잭션을 abort시킨다(락 대신 충돌 감지).
+MySQL 기본은 RR, PostgreSQL 기본은 RC이지만 세션 설정을 직접 확인한다. PostgreSQL RR도 서로 다른 행을 바꾸는 Write Skew(쓰기 편향)를 허용할 수 있다. SERIALIZABLE에서 올바른 업무 판단을 같은 트랜잭션에 넣고 실패한 전체 작업을 재시도하면 이런 비직렬 실행을 배제할 수 있다.
 
 ```sql
--- 세션 격리수준 확인/설정
-SELECT @@transaction_isolation;                 -- MySQL
-SHOW transaction_isolation;                       -- PostgreSQL
+SELECT @@transaction_isolation; -- MySQL
+SHOW transaction_isolation;    -- PostgreSQL
+```
+
+## 2. InnoDB RR: 스냅샷 읽기와 잠금 읽기는 다르다
+
+일반 SELECT는 MVCC(Multi-Version Concurrency Control, 다중 버전 동시성 제어)의 스냅샷을 사용한다. RR에서 첫 일관 읽기가 기준을 만들고 이후 재사용한다. 다른 세션의 INSERT를 막아서 같은 결과를 얻는 것이 아니다. 자기 트랜잭션의 변경은 보일 수 있으므로 단순히 모든 읽기가 과거 DB 전체의 사진이라는 설명도 부족하다.
+
+`SELECT ... FOR UPDATE`는 현재 잠글 수 있는 상태를 읽는다. 범위 검색은 실행계획에 따라 레코드와 갭을 잠가 해당 범위의 INSERT를 대기시킬 수 있다. 같은 트랜잭션에서 일반 읽기와 잠금 읽기를 섞으면 서로 다른 상태를 관측할 수 있다.
+
+```mermaid
+sequenceDiagram
+    participant A as 세션 A InnoDB RR
+    participant DB as orders
+    participant B as 세션 B
+    A->>DB: 일반 SELECT로 PENDING 목록 읽기
+    B->>DB: 새 PENDING 주문 INSERT 후 COMMIT
+    A->>DB: 같은 일반 SELECT
+    DB-->>A: 기존 스냅샷의 목록
+    A->>DB: 같은 조건 FOR UPDATE
+    DB-->>A: 새 커밋을 포함한 잠금 읽기
+```
+
+PostgreSQL RR의 잠금 읽기는 InnoDB의 최신 읽기와 같지 않다. 스냅샷 이후 바뀐 행을 잠그거나 갱신하려 하면 직렬화 실패가 날 수 있다. PostgreSQL SERIALIZABLE의 SSI(Serializable Snapshot Isolation, 직렬화 가능 스냅샷 격리)는 읽기·쓰기 의존성을 감시하지만 기존 쓰기 락을 없애지 않는다.
+
+> **면접 포인트**
+>
+> “InnoDB RR은 팬텀을 막는다” 다음에 읽기 종류를 붙인다. 일반 SELECT의 스냅샷 유지와 범위 잠금의 INSERT 차단은 다른 메커니즘이다. `FOR UPDATE`를 트랜잭션 밖에서 실행해 문장 직후 잠금이 풀리면 뒤따르는 업무를 보호하지 못한다.
+
+## 3. 공유·배타·갭 잠금의 범위
+
+Shared Lock(S, 공유 잠금)끼리는 호환되며 Exclusive Lock(X, 배타 잠금)은 같은 레코드의 다른 S/X와 충돌한다. 이는 단순화한 레코드 잠금 표다. PostgreSQL은 `FOR KEY SHARE` 등 추가 행 잠금 모드를 제공하므로 모든 잠금을 이 두 가지로 환원하지 않는다.
+
+| InnoDB 잠금 | 대상과 효과 | 주의점 |
+|---|---|---|
+| Record Lock | 인덱스 레코드 | 기존 행의 고유 키 동등 검색은 갭 없이 처리 가능 |
+| Gap Lock(갭 잠금) | 레코드 사이 삽입 위치 | 갭 잠금끼리는 공존할 수 있으나 INSERT는 대기 가능 |
+| Next-key Lock(넥스트키 잠금) | 레코드와 그 앞의 갭 | RR 범위 검색에서 잠금 범위가 논리 조건보다 넓을 수 있음 |
+| Intention Lock(의도 잠금) | 테이블 수준의 하위 잠금 의도 | IX 획득 자체가 테이블 전체의 배타 잠금은 아님 |
+| Metadata Lock(메타데이터 잠금) | 테이블 정의 접근 | 일반 DML도 획득하므로 오래 열린 트랜잭션이 DDL을 막을 수 있음 |
+
+```sql
+-- MySQL 8.4, 독립 실습 DB에서 준비
+CREATE TABLE orders (
+  id BIGINT PRIMARY KEY,
+  status VARCHAR(20) NOT NULL,
+  KEY ix_orders_status (status)
+) ENGINE=InnoDB;
+INSERT INTO orders VALUES (10, 'PENDING'), (20, 'SHIPPED');
+
+-- 세션 A
 SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+START TRANSACTION;
+SELECT * FROM orders WHERE status='PENDING' FOR UPDATE;
+-- A를 열린 상태로 둔다.
+
+-- 세션 B: 별도 연결에서 실행
+START TRANSACTION;
+INSERT INTO orders VALUES (15, 'PENDING');
+-- A가 잠근 범위에 삽입하려 하므로 대기한다.
+-- 세션 A에서 COMMIT한 뒤 B도 COMMIT한다.
 ```
 
-> **MVCC가 읽기 일관성의 뿌리**
->
-> InnoDB·PostgreSQL 모두 일반 SELECT는 락 없이 **MVCC(Multi-Version Concurrency Control, 다중버전 동시성제어)** 스냅샷을 읽는다. 그래서 "읽기는 쓰기를 막지 않고, 쓰기는 읽기를 막지 않는다." 락은 주로 *쓰기 vs 쓰기* , 그리고 *잠금 읽기(FOR UPDATE)* 에서 동작한다. (자세한 내부 구조는 03-mvcc-internals 참고)
+정확한 경계는 실제 인덱스·데이터·실행계획과 `performance_schema.data_locks`, `data_lock_waits`로 확인한다. 인덱스가 없으면 전체 스캔으로 잠금과 삽입 차단 범위가 크게 넓어질 수 있다. 이를 “DB가 테이블 X 락으로 승격했다”와 혼동하지 않는다. RC에서는 비일치 행 잠금 해제와 일반 검색의 갭 잠금 축소가 있지만 외래 키·중복 키 검사 등 예외가 있다.
 
-## 3. 공유락(S) / 배타락(X)과 호환성
+일반 SELECT도 항상 모든 잠금과 무관하지는 않다. InnoDB SERIALIZABLE의 조건별 잠금 읽기 전환, 두 DB의 스키마 관련 잠금과 DDL 대기를 별도로 본다.
 
-잠금은 크게 **Shared Lock(S, 공유락)**과 **Exclusive Lock(X, 배타락)**으로 나뉜다. S는 여러 트랜잭션이 함께 읽을 수 있게 하고, X는 쓰기를 위해 독점한다.
+## 4. 여러 SKU 차감: 순서를 명시하고 실패는 전체 롤백한다
 
-#### 락 호환성 매트릭스
-
-| 요청 \ 보유 | S (공유) | X (배타) |
-| --- | --- | --- |
-| **S (공유)** | ✅ 호환 | ❌ 대기 |
-| **X (배타)** | ❌ 대기 | ❌ 대기 |
+Deadlock(교착 상태)은 잠금을 보유한 세션들이 서로를 순환 대기하는 상태다. A→B와 B→A 순서의 주문 차감이 대표적이다. 아래는 양수 수량 검증과 중복 SKU 수량 합산을 완료한 주문이 A 2개, B 1개를 차감하는 예다. `sku_id`는 기본 키이며 모든 차감 경로가 같은 정렬 순서를 따른다.
 
 ```sql
--- 공유락: 읽되 남이 바꾸지 못하게
-SELECT * FROM stock WHERE sku='A' FOR SHARE;          -- (MySQL: LOCK IN SHARE MODE)
-
--- 배타락: 읽고 곧 내가 변경
 BEGIN;
-SELECT qty FROM stock WHERE sku='A' FOR UPDATE;        -- X 락 획득
-UPDATE stock SET qty = qty - 1 WHERE sku='A';
-COMMIT;                                                 -- 락 해제
+-- 애플리케이션이 정렬한 SKU마다 한 문장씩 호출한다.
+UPDATE stock SET qty = qty - 2 WHERE sku_id = 'A' AND qty >= 2;
+-- 영향 행 수가 0이면 즉시 ROLLBACK 후 재고 부족 처리
+UPDATE stock SET qty = qty - 1 WHERE sku_id = 'B' AND qty >= 1;
+-- 영향 행 수가 0이면 A 차감도 포함해 ROLLBACK
+COMMIT;
 ```
 
-| 락 | 설명 | 비고 |
-| --- | --- | --- |
-| **Record Lock** | 인덱스 레코드 단위 락 | WHERE가 인덱스를 타야 좁게 잠김 |
-| **Intention Lock (IS/IX)** | 테이블 레벨 의도 락 | 자동 설정, 테이블락 충돌 빠른 감지용 |
-| **Metadata Lock** | DDL이 잡는 테이블 구조 락 | 마이그레이션 중 블로킹 원인 |
-
-> **인덱스 없는 FOR UPDATE는 테이블을 통째로 잠근다**
->
-> `SELECT ... WHERE col=? FOR UPDATE` 에서 `col` 에 인덱스가 없으면 InnoDB는 풀스캔하며 스캔한 모든 레코드에 락을 건다 → 사실상 테이블 락. 락 읽기는 **반드시 인덱스 조건** 으로 좁혀야 한다.
-
-## 4. Gap Lock / Next-key Lock — 팬텀을 막는 메커니즘
-
-- **Record Lock**: 존재하는 인덱스 레코드 자체를 잠금.
-- **Gap Lock(갭락)**: 인덱스 레코드 *사이의 빈 공간*을 잠금. 그 범위에 새 행 INSERT를 막아 팬텀 방지.
-- **Next-key Lock(넥스트키락)**: Record Lock + Gap Lock 조합. InnoDB RR의 기본 잠금 단위.
-
-```sql
--- id에 (10), (20), (30) 레코드가 있다고 가정
-BEGIN;
-SELECT * FROM orders WHERE id BETWEEN 10 AND 20 FOR UPDATE;
--- 잠기는 범위: 레코드 10, 20 + 그 사이 갭 (10,20) + 다음 갭 일부
--- → 이 동안 id=15 INSERT 는 갭락에 걸려 대기 (팬텀 방지)
-```
+영향 행 수 검사는 애플리케이션 책임이며 위 주석이 SQL 분기를 실행하는 것은 아니다. 조건부 UPDATE도 내부적으로 쓰기 잠금을 사용한다. `ORDER BY`가 있는 단일 범위 SELECT의 결과 순서만으로 모든 실행계획의 실제 잠금 획득 순서를 보장한다고 설명하지 않는다. 명시적인 키 순차 접근도 외래 키·보조 인덱스·다른 코드 경로에서 생기는 모든 교착을 없애지는 않는다.
 
 ```mermaid
 sequenceDiagram
-    participant T1 as 트랜잭션1
-    participant DB as DB
-    participant T2 as 트랜잭션2
-    T1->>DB: SELECT WHERE id BETWEEN 10 AND 20 FOR UPDATE
-    Note over DB: 레코드 + 갭 (10,20) Next-key Lock
-    T2->>DB: INSERT id=15
-    Note over T2: 갭락에 막혀 대기 (blocked)
-    T1->>DB: COMMIT (락 해제)
-    DB-->>T2: INSERT 진행
+    participant T1 as 주문 1
+    participant A as SKU A
+    participant B as SKU B
+    participant T2 as 주문 2
+    T1->>A: UPDATE 잠금 획득
+    T2->>A: UPDATE 대기
+    T1->>B: UPDATE 잠금 획득
+    T1->>T1: COMMIT
+    A-->>T2: 잠금 획득 후 조건 재평가
+    T2->>B: UPDATE
+    T2->>T2: COMMIT
 ```
 
-*Next-key Lock — 갭에 INSERT를 막아 RR에서 팬텀을 차단*
+## 5. 교착과 시간 초과는 복구 단위가 다르다
 
-> **락 현황 진단**
+InnoDB의 기본 교착 감지가 활성화돼 있으면 희생 트랜잭션을 롤백하며 보통 오류 1213을 받는다. 감지를 끈 구성은 시간 초과에 의존할 수 있다. 잠금 대기 시간 초과 1205는 기본적으로 문장만 롤백할 수 있으므로 1213과 같은 상태라고 단정하지 않는다. 애플리케이션은 실패한 주문의 전체 트랜잭션을 명시적으로 롤백한 뒤 새 경계에서 다시 시작한다.
+
+PostgreSQL의 교착 `40P01`, 직렬화 실패 `40001`도 새 트랜잭션에서 읽기·판단부터 재시도한다. 재시도 횟수와 총 기한을 제한하고 무작위 지연을 둔다. 가상의 최대 3회 정책은 무한 재시도를 막기 위한 예시이며 서비스 지연 예산에 맞춰 정한다. 재고 부족 같은 정상 업무 거절은 교착 재시도와 분리한다.
+
+> **실무 함정 — 성공 여부가 불명확한 커밋**
 >
-> 교착·대기를 분석할 때 `SHOW ENGINE INNODB STATUS` 의 *LATEST DETECTED DEADLOCK* 섹션, `performance_schema.data_locks` / `data_lock_waits` 를 본다. PostgreSQL은 `pg_locks` + `pg_stat_activity` .
+> DB 연결이 커밋 응답 전에 끊기면 “롤백됐겠지” 하고 무조건 다시 차감하지 않는다. 주문별 고유 예약 키로 결과를 조회하고 중복 처리를 막는다. 외부 HTTP 호출은 재시도할 DB 트랜잭션 안에 넣지 않는다.
 
-> **갭락은 데드락의 단골 원인**
->
-> 갭락은 "존재하지 않는 행"을 잠그기 때문에 직관과 다르게 동작한다. 서로 다른 두 트랜잭션이 인접 갭을 교차로 잠그면 교착이 난다. READ COMMITTED는 갭락을 거의 쓰지 않아 락 경합이 줄지만, 대신 팬텀을 허용한다 — 정합성 vs 동시성 트레이드오프.
+진단은 InnoDB의 `SHOW ENGINE INNODB STATUS`와 잠금 대기 표, PostgreSQL의 `pg_locks`·`pg_stat_activity`에서 시작한다. 대기 시간뿐 아니라 실패한 전체 거래 수, 재시도 후 성공률, 최종 재고 음수·중복 예약 여부를 측정한다.
 
-## 5. Deadlock(데드락) — 순환 대기
+## 참고 자료
 
-두 트랜잭션이 서로가 가진 락을 기다리면 영원히 진행되지 못한다. InnoDB는 **데드락을 자동 감지**해 비용이 작은 쪽을 victim으로 롤백한다(`ERROR 1213`). 감지에 의존하기보다 **예방**이 우선이다.
-
-```mermaid
-sequenceDiagram
-    participant T1 as 트랜잭션1
-    participant A as 행 A
-    participant B as 행 B
-    participant T2 as 트랜잭션2
-    T1->>A: LOCK A (X)
-    T2->>B: LOCK B (X)
-    T1->>B: LOCK B 요청 → 대기
-    T2->>A: LOCK A 요청 → 대기
-    Note over T1,T2: 순환 대기 = Deadlock → InnoDB가 한쪽 롤백
-```
-
-*데드락 — 락 획득 순서가 엇갈리면 순환 대기 발생*
-
-### 예방 전략
-
-- **잠금 순서 일관성**: 여러 행을 잠글 땐 항상 같은 순서(예: SKU id 오름차순)로 접근. 가장 효과적.
-- **짧은 트랜잭션**: 락 보유 시간을 최소화. 외부 API 호출을 트랜잭션 안에 넣지 않기.
-- **인덱스로 락 범위 축소**: 풀스캔으로 불필요한 행까지 잠그지 않기.
-- **재시도 로직**: 데드락(1213)은 정상적 신호 — 백오프 후 재시도.
-
-> **면접 포인트 — 재고 차감 동시성**
->
-> "여러 주문이 같은 SKU 재고를 동시에 차감할 때 어떻게?" → 격리수준·락을 묶어 답한다: ① 단순하면 **원자적 조건부 UPDATE** ( `UPDATE stock SET qty=qty-1 WHERE sku=? AND qty>=1` )가 락을 명시적으로 다루지 않아 깔끔. ② `FOR UPDATE` 비관적 락은 직관적이나 경합 시 throughput 저하. ③ 멀티 SKU 주문은 **SKU id 정렬 순서로 락** 을 잡아 데드락 예방. (자세히는 07-inventory-concurrency)
-
-```sql
--- 데드락 예방: 항상 작은 sku_id 부터 잠근다
-SELECT * FROM stock
-WHERE sku_id IN (?, ?)
-ORDER BY sku_id            -- 모든 트랜잭션이 동일 순서로 잠금
-FOR UPDATE;
-```
-
-## 이해도 확인 Q&A
-
-아래 질문에 직접 답변을 작성하세요. 자동 저장되며, 버튼으로 복사해 코치에게 피드백을 요청할 수 있습니다.
+- [MySQL 8.4 일관 읽기](https://dev.mysql.com/doc/refman/8.4/en/innodb-consistent-read.html)
+- [MySQL 8.4 잠금 종류](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking.html)
+- [MySQL 8.4 문장별 잠금](https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html)
+- [MySQL 8.4 교착 처리](https://dev.mysql.com/doc/refman/8.4/en/innodb-deadlocks-handling.html)
+- [MySQL 8.4 오류 처리](https://dev.mysql.com/doc/refman/8.4/en/innodb-error-handling.html)
+- [PostgreSQL 17 격리수준](https://www.postgresql.org/docs/17/transaction-iso.html), [명시적 잠금](https://www.postgresql.org/docs/17/explicit-locking.html)

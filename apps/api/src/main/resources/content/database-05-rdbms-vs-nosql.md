@@ -19,11 +19,11 @@ questions:
 ---
 ## 1. CAP 정리와 PACELC 확장
 
-**CAP 정리(CAP Theorem)**는 분산 시스템이 다음 셋 중 둘만 동시에 보장할 수 있다는 명제다.
+**CAP 정리(CAP Theorem)**는 네트워크 분할을 허용하는 분산 읽기·쓰기 모델에서 선형화 가능성과 모든 정상 노드의 요청 완료를 동시에 보장할 수 없다는 결과다.
 
-- **Consistency(일관성)**: 모든 노드가 같은 시점에 같은 데이터를 본다(여기서는 linearizability, 즉 최신 쓰기 즉시 반영).
-- **Availability(가용성)**: 모든 요청이 (성공/실패 무관하게) 응답을 받는다.
-- **Partition tolerance(분할 내성)**: 노드 간 네트워크가 끊겨도 시스템이 계속 동작한다.
+- **Consistency(일관성)**: Linearizability(선형화 가능성). 완료된 쓰기 뒤에 시작한 읽기는 그 쓰기 또는 그 이후 쓰기와 일치해야 하며, 동시 연산은 실제 시간 순서와 양립하는 하나의 순서로 설명된다.
+- **Availability(가용성)**: 실패하지 않은 노드가 받은 요청이 결국 해당 연산을 완료한다. 모든 읽기·쓰기에 오류만 반환하는 것으로 이 조건을 만족시킬 수는 없다. 실무의 가용성 SLO와도 구분한다.
+- **Partition tolerance(분할 내성)**: 노드 집합 사이 메시지가 전달되지 않는 실행도 고려한다. 분할 중 모든 기능이 정상이라는 뜻은 아니다.
 
 > **실무 함정 — CAP의 흔한 오해**
 >
@@ -33,12 +33,14 @@ questions:
 
 CAP은 분할 상황만 다룬다. **PACELC**는 평상시(분할 없을 때)의 트레이드오프까지 명시한다: **분할 시(P) A vs C, 그렇지 않으면(Else, E) L(Latency) vs C(Consistency)**. 즉 정상 운영 중에도 강한 일관성을 위해 지연을 감수할지, 낮은 지연을 위해 일관성을 느슨하게 할지의 선택이 항상 존재한다.
 
-| 시스템 | 분할 시 (P) | 평상시 (E) | 분류 |
-| --- | --- | --- | --- |
-| PostgreSQL / MySQL (단일 primary) | C (가용성 포기) | C (강한 일관성) | PC/EC |
-| DynamoDB / Cassandra (기본) | A (오래된 값 허용) | L (저지연 우선) | PA/EL |
-| MongoDB (기본, primary 읽기) | C | C | PC/EC |
-| Cassandra (QUORUM 읽기/쓰기) | A | C에 가깝게 조절 | PA/EC (튜닝) |
+| 구성·연산 | 분할 시 확인할 것 | 평상시 확인할 것 |
+| --- | --- | --- |
+| 관계형 DB + 복제 | 리더 선출·동기 확인·분할된 쓰기 차단 | 읽기 대상·격리·복제 지연 |
+| DynamoDB 읽기 | 리전·테이블 유형과 연산 보장 | 일관된 읽기 선택 가능 여부·비용 |
+| Cassandra ONE / QUORUM | 필요한 복제본 응답 수 충족 여부 | 지연·쓰기 충돌 해결·읽기 정책 |
+| MongoDB replica set | 과반·리더 가용성과 쓰기 확인 정책 | read concern·write concern·read preference |
+
+제품 하나를 고정된 AP/CP로 분류하지 않는다. Cassandra QUORUM은 필요한 수의 응답을 받지 못하는 분할 구간에서 요청을 완료할 수 없으므로 “언제나 A 유지”가 아니다. 단일 노드 PostgreSQL을 그 자체로 분산 CAP 분류에 넣는 것도 범위가 맞지 않는다. DynamoDB의 강한 읽기는 모든 인덱스·연산에서 지원되는 옵션이 아니며 실제 API 문서로 확인한다.
 
 ```mermaid
 flowchart TB
@@ -59,7 +61,7 @@ flowchart TB
 
 > **면접 포인트**
 >
-> "왜 PACELC가 CAP보다 실무적인가?"에 답할 수 있어야 한다. 핵심: **네트워크 분할은 드문 사건** 이고, 99.9%의 시간은 분할이 없는 평상시다. CAP은 이 평상시를 전혀 설명하지 못한다. PACELC의 **EL vs EC** 가 실제 시스템(DynamoDB의 eventually consistent read vs strongly consistent read)의 일상적 선택을 정확히 모델링한다.
+> "왜 PACELC가 CAP보다 실무적인가?"에 답할 수 있어야 한다. 핵심: CAP은 네트워크 분할 상황을 다루며, 그 발생 빈도를 99.9% 같은 보편 수치로 정해주지는 않는다. CAP은 이 평상시를 전혀 설명하지 못한다. PACELC의 **EL vs EC** 가 실제 시스템(DynamoDB의 eventually consistent read vs strongly consistent read)의 일상적 선택을 정확히 모델링한다.
 
 ## 2. NoSQL 4종 분류
 
@@ -157,7 +159,7 @@ flowchart TB
 
 > **실무 사례**
 >
-> **Netflix** 는 회원별 시청 이력·재생 위치 같은 대용량 시계열을 **Cassandra** 에 저장한다 — partition key는 회원 ID, 쓰기가 폭발해도 선형 확장된다. **Amazon** 의 장바구니(cart)는 **DynamoDB** — "항상 응답해야 하는" 가용성 우선(AP) 요구에 맞춰, 일시적 일관성 결함보다 카트가 절대 안 멈추는 것을 택했다(원조 Dynamo 논문의 동기).
+> **Amazon Dynamo(2007)** 논문은 장바구니 같은 서비스에서 장애 중 가용성을 높이기 위해 버전 관리와 애플리케이션 충돌 해결을 사용한 사례를 설명한다. 논문의 Dynamo를 현재 관리형 서비스 DynamoDB와 동일시하지 않는다. 별도의 가상 설계로 시청 이력을 사용자 키에 따라 분산할 수 있지만, 특정 기업의 현행 파티션 키나 선형 확장을 출처 없이 단정하지 않는다.
 
 > **면접 포인트**
 >
@@ -192,3 +194,12 @@ flowchart TB
 ## 이해도 확인 Q&A
 
 아래 3문항에 직접 답을 적어보세요. 자동 저장되며, 하단 버튼으로 전체를 복사해 피드백을 요청할 수 있습니다.
+
+> **부분 검수 — 2026-09-12**: CAP 정의, 제품 단위 분류, Dynamo 사례를 정정했다. 다른 모델링·제품 기능은 후속 검수 대상이다.
+
+## 참고
+
+- [Gilbert·Lynch: CAP 원 논문](https://groups.csail.mit.edu/tds/papers/Gilbert/Brewer6.pdf)
+- [Amazon Dynamo 원 논문](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf)
+- [DynamoDB 읽기 일관성](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html)
+- [Cassandra Dynamo architecture](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html)

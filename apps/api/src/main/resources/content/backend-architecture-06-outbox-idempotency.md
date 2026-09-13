@@ -98,7 +98,7 @@ flowchart LR
 
 > **⚠️ 실무 함정**
 >
-> 릴레이는 **At-least-once** 다. 발행 후 "발행완료 마킹" 직전에 죽으면 같은 이벤트를 또 발행한다. 그래서 **컨슈머 멱등성이 필수 전제** . Outbox는 "유실 0"을 보장하지만 "중복 0"은 보장 안 한다.
+> 릴레이는 **At-least-once** 다. 발행 후 "발행완료 마킹" 직전에 죽으면 같은 이벤트를 또 발행한다. 그래서 **컨슈머 멱등성이 필수 전제** . Outbox는 로컬 DB 변경과 발행 대기 기록의 원자성을 제공한다. 종단 전달은 DB 내구성, 릴레이 재시도, 브로커 보존과 소비 복구 조건에 의존하며 무조건적인 “유실 0”을 뜻하지 않는다.
 
 ## 4. Idempotency (멱등성) 보장
 
@@ -110,15 +110,15 @@ flowchart LR
 | --- | --- | --- |
 | **Idempotency-Key** | 클라이언트가 고유 키 부여 → 서버가 키별 처리 결과 저장 | 결제 요청, 외부 API 호출 |
 | **처리 이벤트 ID 기록** | 이미 처리한 `eventId`를 DB/Redis에 저장 후 중복 무시 | 이벤트 컨슈머 (Inbox) |
-| **조건부 연산(자연 멱등)** | `SET status='PAID'`처럼 반복해도 결과 동일하게 설계 | 상태 전이 |
+| **조건부 상태 전이** | 허용된 이전 상태·업무 버전을 WHERE로 검사해 반복과 역행 방지 | 상태 전이 |
 | **유니크 제약** | DB unique index로 중복 INSERT 차단 | 주문번호·예약ID |
 
 ```mermaid
 flowchart TB
     R["요청/이벤트 도착\n(idempotency-key 또는 eventId)"]
-    R --> CK{"이미 처리한\n키인가?"}
-    CK -->|"Yes"| SKIP["저장된 결과 반환\n(재처리 안 함)"]
-    CK -->|"No"| PROC["비즈니스 처리"]
+    R --> CK{"고유 키 원자적 선점\n성공했나?"}
+    CK -->|"No"| SKIP["저장된 결과 반환\n(재처리 안 함)"]
+    CK -->|"Yes"| PROC["비즈니스 처리"]
     PROC --> SAVE["키 + 결과 저장\n(같은 트랜잭션)"]
     SAVE --> DONE["응답"]
 
@@ -127,11 +127,11 @@ flowchart TB
     style PROC fill:#dbeafe,stroke:#3b82f6
 ```
 
-*멱등 처리 흐름 — 키 확인 → 처리 → 키+결과 저장을 같은 트랜잭션으로. 중복이 와도 안전.*
+*DB 내부 효과의 멱등 처리 — 고유 키 선점 → 업무 처리 → 결과 저장을 같은 트랜잭션으로 묶고, 실패하면 모두 롤백한다. 외부 결제는 이 경계에 포함되지 않는다.*
 
 > **🎯 면접 포인트**
 >
-> "결제 버튼 더블클릭으로 두 번 요청되면?" → 클라이언트가 **같은 Idempotency-Key** 를 보내고, 서버는 키가 이미 있으면 첫 처리 결과를 그대로 반환. 키 저장과 결제 처리는 **같은 트랜잭션 또는 유니크 제약** 으로 원자화해야 경쟁 조건(동시 두 요청)도 막힌다. 🔥(Deep-dive)
+> "결제 버튼 더블클릭으로 두 번 요청되면?" → 클라이언트가 **같은 Idempotency-Key** 를 보내고, 서버는 키가 이미 있으면 첫 처리 결과를 그대로 반환. 로컬 키 선점과 결제 의도를 같은 DB 트랜잭션으로 저장하고, 외부 PG에는 안정된 멱등 키를 전달해 실행·조회·결과 불명 대사를 수행한다. **UNIQUE 제약은 원격 결제와 DB를 원자 커밋해주지 않는다.** 🔥(Deep-dive)
 
 ## 5. Inbox 패턴 (소비자 측 중복 제거)
 
@@ -145,27 +145,27 @@ sequenceDiagram
 
     K->>C: InventoryReserved (messageId=abc)
     C->>DB: BEGIN
-    C->>DB: SELECT inbox WHERE messageId='abc'
-    alt 이미 처리됨
-        DB-->>C: 존재함 → 스킵
+    C->>DB: INSERT inbox UNIQUE key ON CONFLICT DO NOTHING
+    alt 삽입된 행 없음
+        DB-->>C: 중복 → 스킵
         C->>DB: COMMIT (no-op)
     else 처음
         C->>DB: 비즈니스 처리 (배송 생성)
-        C->>DB: inbox INSERT (messageId='abc')
+        Note over C,DB: 업무 실패 시 Inbox도 롤백
         C->>DB: COMMIT ✅
     end
     C->>K: offset commit
 ```
 
-*Inbox 패턴 — messageId로 중복 판정 + 비즈니스 처리 + inbox 기록을 한 트랜잭션으로 원자화.*
+*Inbox 패턴 — 소비자·messageId 고유 키의 삽입 성공 여부로 업무 실행을 분기한다. 단순 존재 조회로 선점하지 않으며 DB 커밋 이후 Offset을 커밋한다.*
 
 > **💡 Outbox + Inbox = 양쪽 안전**
 >
 > 발행 측 **Outbox** 로 유실 방지, 소비 측 **Inbox** 로 중복 제거. 둘을 합치면 At-least-once 위에서 **Effectively-once** 를 달성한다. 운송장 이벤트처럼 중복·유실이 치명적인 흐름의 표준 조합.
 
-## 6. Exactly-once의 허상
+## 6. Exactly-once의 보장 경계
 
-"정확히 한 번 전달(Exactly-once delivery)"은 분산 환경에서 **수학적으로 불가능**하다. 발행자가 ack를 못 받았을 때 "안 갔다"인지 "갔는데 ack만 유실"인지 구분할 수 없기 때문이다. 재전송하면 중복, 안 하면 유실.
+확인 응답을 받지 못한 발행자는 미전달과 응답 유실을 구분하기 어렵다. 그래서 전송 시도는 반복될 수 있다. 하지만 이를 근거로 모든 exactly-once 처리가 불가능하다고 말하면 안 된다. 트랜잭션과 중복 제거로 **정의된 관측 경계 안에서 한 번 반영한 결과**를 만들 수 있으며, 그 경계에 외부 DB·결제가 포함되는지 확인해야 한다.
 
 ```mermaid
 flowchart LR
@@ -188,7 +188,7 @@ flowchart LR
 
 | 용어 | 의미 |
 | --- | --- |
-| Exactly-once **delivery** | 전달이 정확히 1번 — 분산 환경에서 불가능 |
+| 전송 시도·재전달 | 응답 유실 후 반복될 수 있음. 브로커의 중복 제거 범위와 구분 |
 | Exactly-once / Effectively-once **processing** | 결과가 1번 처리한 것과 동일 — 멱등성으로 **달성 가능** |
 
 ## 7. 물류 적용 예제 — 재고 예약 + 운송장 이벤트
@@ -240,10 +240,12 @@ sequenceDiagram
 
 > **🎯 면접 포인트 (종합)**
 >
-> 이 장의 세 핵심 — ① Dual-write는 Outbox로 ② 중복은 멱등(Inbox/Key)으로 ③ Exactly-once delivery는 불가, Effectively-once processing이 목표 — 를 한 문장으로 엮어 답하면 분산 시스템 정합성에 대한 시니어 이해를 보여준다.
+> 이 장의 세 핵심 — ① Dual-write는 Outbox로 ② 중복은 멱등(Inbox/Key)으로 ③ 전달 재시도와 한 번 반영되는 처리 결과의 경계를 구분 — 를 한 문장으로 엮어 답하면 분산 시스템 정합성에 대한 시니어 이해를 보여준다.
 
 ```sql
 INSERT INTO consumer_inbox(consumer, event_id, processed_at)
 VALUES (:consumer, :eventId, now())
 ON CONFLICT (consumer, event_id) DO NOTHING;
 ```
+
+> **부분 검수 — 2026-09-12**: 기존 두 번째 질문의 “유실 0”은 내구성과 재시도가 작동한다는 조건을 생략한 표현이다. 답변에서는 이 전제를 먼저 지적한다. 질문·답변 연결은 유지했다. 참고: [Transactional Outbox](https://microservices.io/patterns/data/transactional-outbox.html), [Kafka 4.1 Design](https://kafka.apache.org/41/design/design/).

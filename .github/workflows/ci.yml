@@ -35,6 +35,10 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
+      - name: Study and content regression tests
+        run: |
+          npm run test:study
+          python3 ../../scripts/content-examples.test.py
       - name: Build
         run: npm run build
         env:

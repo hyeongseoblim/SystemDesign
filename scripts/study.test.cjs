@@ -52,9 +52,9 @@ test('랜덤 정렬 키는 동일한 시드에서 복귀·재조회 후에도 �
 test('목차는 코드 펜스 안의 제목과 중복 질문 섹션을 제외한다', () => {
   assert.deepEqual(headings('## 1. **핵심**\n```md\n## 예시\n```\n## 이해도 확인\n'), [{ title: '1. 핵심', id: sectionId('1. 핵심') }]);
 });
-test('10개 카드의 30개 점검 기준은 실제 질문과 정확히 연결된다', () => {
+test('34개 카드의 102개 점검 기준은 실제 질문과 정확히 연결된다', () => {
   const guides = JSON.parse(readFileSync(path.join(web, 'content/answer-guides.json'), 'utf8'));
-  assert.equal(Object.keys(guides).length, 10);
+  assert.equal(Object.keys(guides).length, 34);
   for (const [slug, guide] of Object.entries(guides)) {
     const raw = readFileSync(path.join(root, `apps/api/src/main/resources/content/${slug}.md`), 'utf8');
     const questions = raw.split('---')[1].split('questions:\n')[1].trim().split('\n').map(line => JSON.parse(line.trim().slice(2)));
@@ -73,4 +73,53 @@ test('V8은 검수 본문을 정확히 반영하고 기존 질문·카드 ID를 
   assert.equal(migration.split('$card_body$')[1], source);
   assert.match(migration, /WHERE slug = 'database-01-index-explain' AND source = 'MANUAL'/);
   assert.doesNotMatch(migration, /DELETE FROM|UPDATE card_questions|SET id\s*=/i);
+});
+
+// SQL 본문은 마크다운 코드 예제도 포함하므로 UPDATE 바깥 구조만 파싱한다.
+test('V9는 검수한 32개 MANUAL 카드의 본문만 갱신하고 원본과 일치한다', () => {
+  const directory = path.join(root, 'apps/api/src/main/resources');
+  const sql = readFileSync(path.join(directory, 'db/migration/V9__review_existing_content.sql'), 'utf8');
+  const statements = [...sql.matchAll(/UPDATE cards\nSET content_md = (\$review_\d+\$)([\s\S]*?)\1\nWHERE slug = '([^']+)' AND source = 'MANUAL';/g)];
+  const expected = [
+    'backend-02-concurrency',
+    'backend-03-transaction',
+    'backend-04-resilience-idempotency',
+    'backend-07-interview-concurrency',
+    'backend-architecture-01-msa-vs-monolith',
+    'backend-architecture-03-event-driven',
+    'backend-architecture-04-saga',
+    'backend-architecture-06-outbox-idempotency',
+    'backend-architecture-07-interview-saga',
+    'backend-architecture-11-idempotent-consumer-design',
+    'database-02-lock-isolation',
+    'database-03-mvcc-internals',
+    'database-05-rdbms-vs-nosql',
+    'database-07-inventory-concurrency',
+    'database-08-interview-index-lock',
+    'infra-12-kubernetes-resource-management',
+    'logistics-10-order-promise',
+    'logistics-11-inventory-ledger',
+    'logistics-12-sku-barcode-serial',
+    'logistics-13-scan-event-correction-design',
+    'logistics-14-carrier-gateway-design',
+    'logistics-15-rocket-delivery-design',
+    'logistics-16-realtime-dispatch-design',
+    'logistics-17-fulfillment-operations-interview',
+    'logistics-18-slotting-optimization',
+    'logistics-19-event-pipeline-interview',
+    'system-design-07-consistency-consensus',
+    'system-design-17-replication-protocols',
+    'system-design-18-distributed-clocks',
+    'system-design-21-distributed-lock-design',
+    'system-design-25-transaction-isolation',
+    'system-design-26-message-queue-selection',
+  ];
+  assert.deepEqual(statements.map(match => match[3]).sort(), expected.sort());
+  let remainder = sql;
+  for (const [statement, , body, slug] of statements) {
+    const source = readFileSync(path.join(directory, `content/${slug}.md`), 'utf8').split('---').slice(2).join('---').trim();
+    assert.equal(body, source, slug);
+    remainder = remainder.replace(statement, '');
+  }
+  assert.equal(remainder.replace(/^--.*$/gm, '').trim(), '', '검수 본문 UPDATE 외 SQL은 허용하지 않는다');
 });

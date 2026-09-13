@@ -18,157 +18,152 @@ questions:
   - "콘서트 티켓 1만 장에 동시 접속 50만이 몰립니다. RDBMS 단일 행 차감이 왜 병목인지 설명하고, Redis 원자 감소 방식의 설계(Lua·영속성·DB 반영)와 그 정합성 리스크 및 보완책을 제시하세요."
   - "풀필먼트에서 한 주문이 여러 SKU 재고를 차감하며, 부분 성공을 허용하지 않습니다(전부 되거나 전부 실패). 데드락을 예방하면서 원자성을 보장하는 방법과, 결제 미완료 시 예약을 되돌리는 TTL 설계를 설명하세요. 멱등성은 왜 필요한가요?"
 ---
-## 1. 문제 정의 — Oversell(초과판매)의 정체
+> **검수 기준 — 2026-09-12**
+>
+> PostgreSQL 17의 조건부 갱신과 Redis의 원자 실행·복제 경계를 구분한다. 티켓·창고 예제와 수치는 가상 설계이며 특정 기업의 실제 구현을 뜻하지 않는다.
 
-재고 차감은 전형적인 **read-modify-write**다: 현재 수량을 읽고 → 검사하고 → 차감해 쓴다. 이 사이에 다른 트랜잭션이 끼면 **Lost Update(갱신 손실)**가 나고, 재고 1개를 두 주문이 모두 팔아버리는 **Oversell(초과판매)**이 된다.
+## 1. 수량과 예약 불변식을 함께 지킨다
+
+SKU(Stock Keeping Unit, 재고 관리 단위) A가 한 개 남았다. 요청 두 개가 각각 1을 읽고 0으로 덮어쓰면 DB에는 음수가 없지만 두 주문이 성공할 수 있다. **재고 음수 방지**와 **같은 주문의 중복 예약 방지**는 다른 조건이다.
 
 ```mermaid
 sequenceDiagram
-    participant T1 as 주문1
-    participant DB as stock(qty=1)
-    participant T2 as 주문2
-    T1->>DB: SELECT qty → 1
-    T2->>DB: SELECT qty → 1 (둘 다 1로 읽음)
-    T1->>DB: UPDATE qty = 1 - 1 = 0
-    T2->>DB: UPDATE qty = 1 - 1 = 0 (T1 갱신 덮어씀)
-    Note over T1,T2: 1개를 2명에게 판매 = Oversell
+    participant A as 주문 A
+    participant D as stock qty=1
+    participant B as 주문 B
+    A->>D: SELECT qty=1
+    B->>D: SELECT qty=1
+    A->>D: UPDATE qty=0
+    B->>D: UPDATE qty=0
+    Note over D: 수량은 0이나 두 주문이 성공할 수 있음
 ```
 
-*Lost Update — 검사와 쓰기 사이의 틈에서 두 주문이 같은 재고를 동시 차감*
+가상 모델에서는 `available = on_hand - reserved`다. 예약은 가용 수량을 점유하고, 출고는 실물 수량을 줄이며 예약 점유를 해제한다. 예약이 영원히 남으면 실제 재고가 있어도 판매하지 못하는 과소판매가 생긴다. TTL(Time To Live, 유효 기간)은 만료 판단 기준이며 자동으로 DB 보상을 실행해주지 않는다.
 
-> **물류 맥락 — Reserve 단계에서 막아야 한다**
->
-> WMS의 **Reserve(예약) → Commit(출고확정) → Ship(출고)** 에서 Oversell은 보통 **Reserve 시점** 에 막는다. 가용재고(Available = On-hand − Reserved)를 원자적으로 차감하고, **예약에 TTL** 을 걸어 결제 미완료 시 자동 복원한다. TTL 없이 예약만 잡으면 "주문은 받았는데 실물이 없는" 유령 재고가 쌓인다.
+## 2. 조건부 UPDATE를 기본 후보로 둔다
 
-## 2. Pessimistic Lock(비관적 락)
-
-"충돌이 잦을 것"이라 가정하고 **먼저 락을 잡는다**. `SELECT ... FOR UPDATE`로 행에 배타락(X)을 걸어, 다른 트랜잭션을 대기시킨다.
+아래에서 `qty`는 가용 수량이고 `sku`는 고유 키다. 요청 수량은 양의 정수로 검증하고 모든 차감 경로가 같은 규칙을 지킨다고 가정한다.
 
 ```sql
-BEGIN;
-SELECT qty FROM stock WHERE sku='A' FOR UPDATE;   -- X 락, 경쟁자 대기
--- 애플리케이션에서 qty >= 1 검사
-UPDATE stock SET qty = qty - 1 WHERE sku='A';
-COMMIT;                                            -- 락 해제 → 다음 대기자 진행
+UPDATE stock
+SET qty = qty - :requested_qty
+WHERE sku = :sku
+  AND :requested_qty > 0
+  AND qty >= :requested_qty;
+-- 영향 행 1개: 차감됨. 0개: 품절·SKU 없음·잘못된 요청 중 하나.
+-- 주문 성공 응답은 관련 예약 기록까지 커밋된 다음 반환한다.
 ```
+
+재고 1개에 서로 다른 주문 100개가 한 개씩 요청하면, 같은 행의 조건 검사와 변경이 직렬화되어 한 요청만 차감할 수 있다. UPDATE는 내부적으로 잠금을 사용한다. 락이 없어서 빠른 것이 아니라 `SELECT FOR UPDATE → 앱 판단 → UPDATE`의 왕복을 줄일 수 있는 것이다.
+
+잠금은 일반적으로 트랜잭션 종료까지 유지된다. 뒤에 느린 HTTP 호출을 붙이면 한 문장 차감이라도 짧은 잠금이 아니다. DB 타임아웃·데드락·직렬화 실패는 여전히 가능하므로 업무 실패와 재시도 가능한 오류를 구분한다.
+
+## 3. 비관적·낙관적 잠금과 비교한다
+
+| 방식 | 적합한 조건 | 지불할 비용 |
+|---|---|---|
+| 조건부 UPDATE | 한 행의 단순 수량 조건 | Hot Row 경합·영향 행 검사 |
+| SELECT FOR UPDATE | 읽은 값을 바탕으로 여러 규칙 판단 | 트랜잭션 동안 대기·왕복·데드락 |
+| 버전 비교 UPDATE | 충돌 드문 복합 수정 | 충돌 후 재조회·재계산 |
+| 키별 순차 처리 | 같은 SKU의 많은 요청을 조절 | 큐 대기·재배정·중복 방지 |
+
+낙관적 갱신도 UPDATE 시 DB 잠금을 쓴다. “미리 잠그지 않는다”가 “락 대기가 없다”는 뜻은 아니다.
+
+```sql
+UPDATE stock
+SET qty = qty - :requested_qty, version = version + 1
+WHERE sku = :sku
+  AND version = :read_version
+  AND :requested_qty > 0
+  AND qty >= :requested_qty;
+```
+
+영향 행이 0개면 품절인지 버전 충돌인지 확인한다. 충돌 재시도는 새 트랜잭션에서 재조회하고 전체 시간·시도 횟수를 제한한다. 단일 SKU 한 건 처리가 평균 2ms 동안 직렬 자원을 점유한다고 가정하면 단순 상한은 약 500건/초다. 실제로는 로그·인덱스·대기·다른 트랜잭션의 영향을 측정해야 한다. 접속자 50만 명 자체는 초당 DB 요청 수가 아니다.
+
+## 4. 여러 SKU와 중복 예약은 하나의 커밋으로
+
+같은 DB 안의 여러 SKU라면 한 트랜잭션으로 전부 성공하거나 전부 롤백할 수 있다. 같은 SKU가 주문에 반복되면 수량을 합치고 SKU 순서로 처리한다. 재시도마다 새로운 예약 ID를 만들지 않는다.
+
+```text
+begin transaction
+claim reservation_id with UNIQUE constraint
+if existing:
+    verify same customer and normalized item quantities
+    return existing reservation state without another decrement
+for each aggregated item sorted by sku:
+    conditional decrement of available quantity
+    if affected rows != 1: rollback the whole transaction
+save reservation items, status=RESERVED, expires_at
+commit
+```
+
+다른 테이블·인덱스 잠금까지 모두 같은 순서라는 보장은 없으므로 정렬만으로 모든 데드락을 제거했다고 말하지 않는다. 여러 DB로 나뉘면 이 로컬 원자성이 사라진다. 부분 예약을 해제하는 보상과 중간 상태를 설계하거나, 함께 예약해야 할 재고의 데이터 경계를 바꾼다.
+
+## 5. 만료와 결제 완료가 동시에 오면
+
+예약 행은 `RESERVED → CONFIRMED` 또는 `RESERVED → EXPIRED` 중 한 번만 전이한다. 결제 완료가 늦게 도착했는데 예약을 이미 해제했다면 자동으로 다시 CONFIRMED로 바꾸지 않는다. 재예약 가능 여부를 확인하거나 결제 취소·환불 흐름으로 보낸다.
 
 ```mermaid
-sequenceDiagram
-    participant T1 as 주문1
-    participant DB as stock 행
-    participant T2 as 주문2
-    T1->>DB: SELECT FOR UPDATE (X 락 획득)
-    T2->>DB: SELECT FOR UPDATE → 대기 (blocked)
-    T1->>DB: UPDATE qty-1 / COMMIT (락 해제)
-    DB-->>T2: 락 획득 → 최신 qty 읽고 차감
-    Note over T1,T2: 직렬화되어 정확하나, 경합 시 대기 큐로 throughput 저하
+stateDiagram-v2
+    [*] --> RESERVED
+    RESERVED --> CONFIRMED: 유효한 결제 확인
+    RESERVED --> EXPIRED: 만료 작업이 전이 선점
+    EXPIRED --> RECONCILING: 늦은 결제 확인
+    RECONCILING --> REFUND_PENDING: 재예약 불가
+    CONFIRMED --> SHIPPED: 출고
 ```
 
-*비관적 락 — 직렬 처리로 정확하지만, 락 대기가 곧 throughput 병목*
-
-> **트레이드오프와 주의**
->
-> 장점: 직관적·확실. 단점: 같은 SKU 경합이 심하면 **대기 큐가 길어져 throughput 급락** , 락 보유 중 외부 호출하면 락 점유 시간 폭증, 멀티 SKU면 데드락 위험. `innodb_lock_wait_timeout` (기본 50s) 초과 시 에러 — 타임아웃을 짧게(예: 3s) 잡고 재시도 설계. WHERE는 반드시 인덱스(PK)로 좁혀 행만 잠그게 한다.
-
-## 3. Optimistic Lock(낙관적 락)
-
-"충돌은 드물 것"이라 가정하고 락을 잡지 않는다. **version 컬럼**을 읽어두고, UPDATE 시 version 일치를 조건으로 건다. 어긋나면(affected rows=0) 누군가 먼저 바꾼 것이므로 재시도한다.
-
 ```sql
--- 1) 읽기
-SELECT qty, version FROM stock WHERE sku='A';     -- qty=10, version=42
--- 2) 비즈니스 로직
--- 3) 조건부 갱신 (version 검사 포함)
-UPDATE stock
-SET qty = qty - 1, version = version + 1
-WHERE sku='A' AND version = 42;
--- affected rows = 1 → 성공 / 0 → 충돌 → 1)부터 재시도
-```
-
-> **고경쟁엔 부적합 — 재시도 폭증**
->
-> 충돌이 드물면(서로 다른 SKU) 락 비용 없이 빠르다. 그러나 **같은 인기 SKU에 동시 요청이 몰리면 대부분 충돌→재시도** 로 CPU·DB 라운드트립이 폭증한다(라이브 코노 티켓팅처럼). 재시도 횟수 상한·지수 백오프를 두지 않으면 장애로 번진다. 재고처럼 "한 행에 경쟁이 집중"되는 케이스엔 보통 다음의 원자적 UPDATE가 더 낫다.
-
-## 4. 원자적 조건부 UPDATE — 권장 기본값
-
-읽고-검사하고-쓰는 세 단계를 **단일 UPDATE 문장**으로 합친다. DB가 그 한 문장을 원자적으로 처리하므로 Lost Update가 원천 차단된다. 락을 명시적으로 다루지 않아 코드도 깔끔하다.
-
-```sql
--- 한 문장에 검사 + 차감 (음수 방지 조건 포함)
-UPDATE stock
-SET qty = qty - 1
-WHERE sku = 'A' AND qty >= 1;
--- affected rows = 1 → 차감 성공
--- affected rows = 0 → 품절 (또는 SKU 없음) → 애플리케이션이 '재고없음' 응답
-```
-
-> **왜 권장인가**
->
-> ① 단일 statement라 **경합 시에도 행 락이 매우 짧게** 잡혔다 풀린다(SELECT FOR UPDATE처럼 애플리케이션 왕복을 락 안에 두지 않음). ② `qty >= 1` 조건이 Oversell을 SQL 레벨에서 보장. ③ 버전 컬럼·재시도 루프 불필요. 단순 단일 SKU 차감이라면 이게 거의 항상 정답. 한계: 차감과 함께 *복잡한 다중 테이블 비즈니스 로직* 이 한 트랜잭션에 묶이면 비관적 락이나 Saga가 필요할 수 있다.
-
-```sql
--- 멀티 SKU 주문: 데드락 예방 위해 sku 정렬 후 각각 원자 차감
--- (한 건이라도 0이면 트랜잭션 롤백 → 전부 실패 처리)
+-- 만료 처리 트랜잭션의 첫 단계. 예약 품목은 생성 후 불변이라고 가정한다.
 BEGIN;
-UPDATE stock SET qty=qty-2 WHERE sku='A' AND qty>=2;  -- 정렬: A 먼저
-UPDATE stock SET qty=qty-1 WHERE sku='B' AND qty>=1;  -- 그다음 B
--- 둘 다 affected=1 이면 COMMIT, 아니면 ROLLBACK
+UPDATE reservations
+SET status = 'EXPIRED'
+WHERE id = :reservation_id
+  AND status = 'RESERVED'
+  AND expires_at <= CURRENT_TIMESTAMP
+RETURNING id;
+-- 반환된 행이 있을 때만 품목별 가용 수량 복원.
+-- 위 상태 변경과 모든 수량 복원을 같은 트랜잭션으로 커밋.
 COMMIT;
 ```
 
-## 5. Redis 원자 감소 — 초고 TPS 선착순
+확정 처리도 `status='RESERVED'` 조건을 검사해 동일 예약 행에서 경쟁한다. 만료 처리 재실행은 이미 EXPIRED이므로 수량을 다시 더하지 않는다. 복원 중 DB 실패면 상태 전이도 롤백되어 다음 시도에서 복구할 수 있다.
 
-DB 한 행에 초당 수만~수십만 요청이 몰리는 **콘서트 티켓·선착순 쿠폰**은 RDBMS 단일 행이 병목이다. Redis의 단일 스레드 + 원자 연산(`DECR`)이나 **Lua 스크립트**로 선차감하고, DB에는 비동기로 반영한다.
+Redis 만료 알림은 내구성 있는 업무 큐가 아니며 구독이 끊기면 놓칠 수 있다. DB의 `status, expires_at` 인덱스를 이용한 주기 스캔·재시도·대사로 누락된 만료도 수렴시킨다.
 
-```
--- Lua: 재고 확인 + 차감을 원자적으로 (음수 방지)
--- KEYS[1]=stock:sku:A  ARGV[1]=차감수량
-local q = tonumber(redis.call('GET', KEYS[1]))
-if q == nil or q < tonumber(ARGV[1]) then
-  return -1                       -- 재고 부족
+## 6. Redis 선차감은 별도의 실패 모델을 만든다
+
+아래 Lua는 **한 키의 재고 검사와 감소만** 원자화하는 학습용 예제다. 실행 전 키 자료형이 문자열이고 수량 범위가 애플리케이션의 안전한 정수 범위 안이라고 가정한다. 요청 멱등성과 이벤트 내구성은 포함하지 않는다.
+
+```lua
+local requested = tonumber(ARGV[1])
+if requested == nil or requested <= 0 or requested % 1 ~= 0 then
+  return redis.error_reply('invalid quantity')
 end
-return redis.call('DECRBY', KEYS[1], ARGV[1])   -- 남은 수량
+local available = tonumber(redis.call('GET', KEYS[1]))
+if available == nil or available < requested then
+  return -1
+end
+return redis.call('DECRBY', KEYS[1], requested)
 ```
 
-> **정합성 리스크 — 캐시-DB 불일치**
->
-> Redis가 진실원(source of truth)이 되면 **Redis 장애·재시작 시 차감분 유실** 위험이 있다(AOF/RDB 영속성 설정 필수). DB 비동기 반영이 밀리면 캐시-DB가 어긋난다. 그래서 보통 **선착순/이벤트성** 에만 쓰고, 결과를 큐(Kafka)로 DB에 안전 반영 + 보상 처리한다. 또는 미리 토큰을 발급하는 **토큰/쿠폰 풀** 방식으로 동시성을 사전 분산한다.
+단순 `DECRBY → 음수이면 INCRBY` 두 요청은 그 사이 종료되면 복원이 빠진다. Lua도 실행 중 다른 요청이 끼지 않는 보장과 장애 후 데이터 내구성이 별개다. **Redis 차감 성공 → Kafka 발행 전 종료**는 또 다른 Dual Write(이중 쓰기) 문제다. AOF(Append Only File, 추가 기록 파일)를 켜는 것만으로 해결되지 않는다.
 
-> **면접 포인트 — "그냥 stock = stock - 1 하면 되지 않나요?"**
->
-> 이렇게 답하면 탈락이다. 면접관이 원하는 건 **① Lost Update/Oversell이 왜 생기는지 → ② 4~5가지 해법의 트레이드오프 → ③ 주어진 조건(경합·TPS·정합성)에서의 선택 → ④ 데드락/예약 TTL/재시도 같은 운영 디테일** 이다. 쿠팡 로켓배송 일반 재고는 **원자적 조건부 UPDATE** 로 충분하고, 한정판 드롭·티켓팅은 **Redis 선차감 + 큐 반영** 으로 간다 — 케이스를 나눠 답하라.
+| 위험 | 필요한 설계 |
+|---|---|
+| 응답 유실 후 같은 요청 재시도 | 예약 ID별 결과 보존·조회 |
+| 복제 전 장애로 차감 기록 소실 | 내구성 기준·승격 시 검증·판매 일시 중지 정책 |
+| 차감 후 이벤트 발행 실패 | 예약 기록과 전달 대기 기록을 같은 경계에서 남기고 재전달 |
+| 비동기 DB 반영 지연 | 예약과 DB의 대사·오래된 미반영 감시 |
+| 최종 수량 불확실 | 과판매 허용 대신 확정 지연 또는 DB 최종 검증 |
 
-## 6. 성능·정합성 종합 비교
+Redis는 비동기 복제로 인해 승격 시 확인받은 쓰기가 사라질 수 있다. WAIT 같은 복제 확인도 모든 장애에서 강한 일관성을 보장하지 않는다. Lua로 여러 키를 다루는 경우 Cluster의 슬롯 제약과 실행 오류·복구까지 검토한다. 이 책임을 감당하기 어렵다면 DB를 최종 진실원으로 두고 대기열·입장 제한을 먼저 적용한다.
 
-| 방식 | Throughput | 정합성 | 구현 복잡도 | Oversell 위험 | 적합 상황 |
-| --- | --- | --- | --- | --- | --- |
-| 비관적 락 (FOR UPDATE) | 낮음(경합 시 대기) | 강함 | 중 | 없음 | 차감+복잡 로직이 한 트랜잭션 |
-| 낙관적 락 (version) | 경합 적으면 높음 / 많으면 급락 | 강함 | 중(재시도) | 없음 | 충돌 드문 분산 업데이트 |
-| **원자적 조건부 UPDATE** | 높음(짧은 행 락) | 강함 | 낮음 | 없음 | **일반 재고 차감 기본값** |
-| Redis 원자 감소 | 매우 높음 | 약함(비동기·캐시) | 높음(동기화·보상) | 설정 미흡 시 있음 | 티켓팅·선착순 초고 TPS |
-| 토큰/쿠폰 풀 | 매우 높음 | 중~강(사전 발급) | 높음 | 없음(토큰 한정) | 한정 수량 사전 분배 |
+> **면접 포인트** — “티켓팅이면 Redis”가 정답은 아니다. 유입률·허용 대기·과판매 비용·DB 측정 결과를 제시하고, 선택한 방식에서 중복·만료·장애 후 재개를 어떻게 처리하는지 설명한다.
 
-```mermaid
-flowchart TD
-    A["재고 차감 설계"] --> B{초고 TPS\n선착순/티켓팅?}
-    B -- YES --> R["Redis 선차감\n+ 큐로 DB 반영\n(영속성·보상 필수)"]
-    B -- NO --> C{차감과 함께\n복잡한 다중 로직?}
-    C -- NO --> U["원자적 조건부 UPDATE\nqty=qty-1 WHERE qty>=1\n(기본 권장)"]
-    C -- YES --> D{충돌 빈도}
-    D -- "잦음(인기 SKU)" --> P["비관적 락\nFOR UPDATE\n+ 짧은 타임아웃"]
-    D -- "드뭄(분산)" --> O["낙관적 락\nversion + 재시도"]
-    style U fill:#dcfce7,stroke:#16a34a
-    style R fill:#ede9fe,stroke:#8b5cf6
-    style P fill:#fef3c7,stroke:#d97706
-    style O fill:#dbeafe,stroke:#3b82f6
-```
+## 참고
 
-*의사결정 — TPS·로직 복잡도·충돌 빈도로 방식을 선택*
-
-> **실무 사례 매핑**
->
-> 쿠팡 로켓배송 일반 재고 = 원자적 조건부 UPDATE / 한정판 드롭·콘서트 티켓 = Redis 선차감 + Kafka 반영 / 배민·토스 선착순 쿠폰 = 토큰 풀 사전 발급. 어떤 방식이든 **예약 TTL과 멱등성(Idempotency)** (같은 주문 재시도가 두 번 차감하지 않도록 Idempotency-Key)이 짝으로 붙어야 한다.
-
-## 이해도 확인 Q&A
-
-아래 질문에 직접 답변을 작성하세요. 자동 저장되며, 버튼으로 복사해 코치에게 피드백을 요청할 수 있습니다.
+- [PostgreSQL 17 Transaction Isolation](https://www.postgresql.org/docs/17/transaction-iso.html)
+- [Redis Lua 실행](https://redis.io/docs/latest/develop/programmability/eval-intro/)
+- [Redis 복제 보장](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/)
+- [Redis 만료 알림](https://redis.io/docs/latest/develop/pubsub/keyspace-notifications/)

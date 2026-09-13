@@ -40,7 +40,7 @@ flowchart LR
 
 > **⚠️ 실무 함정 — 풀 사이징 불균형**
 >
-> Tomcat 스레드 200개인데 HikariCP 커넥션 10개면, 190개 스레드가 커넥션을 기다리며 블로킹된다. 커넥션풀 권장 공식: `connections ≈ (core_count × 2) + effective_spindle_count` . 무작정 키우면 DB가 죽는다. 스레드풀과 커넥션풀, 다운스트림 타임아웃을 **한 세트로** 설계해야 함.
+> 스레드 200개가 동시에 DB 연결을 요구하고 연결 10개가 모두 사용 중이면 나머지는 대기할 수 있다. 하지만 스레드 수 차이가 언제나 대기자 수는 아니다. HikariCP의 코어·디스크 기반 경험식은 시작점이며 SSD·쿼리 비용·DB CPU·서비스 복제본 수에 따라 부하 시험으로 조정한다. 스레드풀과 커넥션풀, 다운스트림 타임아웃을 **한 세트로** 설계해야 함.
 
 ## 2. Race Condition — 경쟁 상태
 
@@ -56,12 +56,12 @@ sequenceDiagram
     Note over T1,T2: 둘 다 1을 읽음 (lost update 시작)
     T1->>M: write stock = 0
     T2->>M: write stock = 0
-    Note over M: 2건 팔렸는데 stock=0 (−1 되어야 정상)→ Oversell 발생
+    Note over M: 재고는 0인데 두 주문이 성공 → Oversell 발생
 ```
 
 *Lost Update — 두 스레드가 같은 값을 읽고 각자 덮어쓰면 한 번의 갱신이 사라짐*
 
-```sql
+```kotlin
 // 동시성 버그가 있는 코드 — 절대 이렇게 하지 말 것
 fun decreaseStock(productId: Long) {
     val product = repository.findById(productId)   // read
@@ -83,17 +83,17 @@ void worker() { while (!stop) { doWork(); } }   // 다른 스레드
 void shutdown() { stop = true; }              // 메인 스레드
 ```
 
-*`volatile`은 **가시성**과 **순서(happens-before)**는 보장하지만 **원자성**은 보장하지 않음 — `count++` 에는 부족*
+*`volatile`은 **가시성**과 **순서(happens-before)**를 제공하고 단일 읽기·쓰기는 원자적이지만 **읽기-증가-쓰기 전체의 원자성**은 보장하지 않음 — `count++` 에는 부족*
 
 | 도구 | 가시성 | 원자성 | 용도 |
 | --- | --- | --- | --- |
-| `volatile` | ✅ | ❌ | 플래그·상태 신호 (단일 쓰기) |
+| `volatile` | ✅ | 단일 읽기·쓰기만, 복합 연산은 ❌ | 플래그·상태 신호 |
 | `AtomicLong` / CAS | ✅ | ✅ | 카운터·증감 (lock-free) |
 | `synchronized` / Lock | ✅ | ✅ (구간) | 복합 연산 보호 |
 
 > **💡 happens-before**
 >
-> `synchronized` unlock → 다음 lock, `volatile` write → 다음 read 사이에 **happens-before 관계** 가 성립해, 그 이전의 모든 쓰기가 보이도록 보장된다. 동시성 코드의 정합성은 이 관계를 만족시키느냐로 판단.
+> 같은 모니터의 unlock → 후속 lock, 같은 `volatile` 변수의 write → 후속 read 사이에 **happens-before 관계** 가 성립해, 그 이전의 모든 쓰기가 보이도록 보장된다. 동시성 코드의 정합성은 이 관계를 만족시키느냐로 판단.
 
 ## 4. 락 — 비관적 락 vs 낙관적 락
 
@@ -102,7 +102,7 @@ void shutdown() { stop = true; }              // 메인 스레드
 | 가정 | 충돌이 자주 난다 | 충돌이 드물다 |
 | 구현 | `SELECT ... FOR UPDATE` (DB 행 잠금) | `@Version` 컬럼 비교 후 UPDATE |
 | 충돌 시 | 대기 (블로킹) | 실패 → 재시도 (`OptimisticLockException`) |
-| 장점 | 확실·재시도 불필요 | 락 대기 없음·읽기 성능 좋음 |
+| 장점 | 읽고 판단하는 동안 경쟁 변경 제어 | 사전 읽기 잠금 없이 버전으로 충돌 검출 |
 | 단점 | 락 경합·데드락·처리량 저하 | 경합 심하면 재시도 폭증 |
 | 적합 | 인기 상품 한정 수량 (경합 심함) | 일반 상품 재고 (경합 낮음) |
 
@@ -125,15 +125,15 @@ sequenceDiagram
 
 > **🎯 면접 포인트 — synchronized로는 왜 안 되나**
 >
-> "재고 차감을 `synchronized` 로 막으면 되지 않나요?" → **서버가 2대 이상이면 JVM 락은 무력** 하다(프로세스 경계를 못 넘음). 분산 환경에선 **DB 락 / Redis 분산락 / DB 원자 연산** 중 하나여야 한다. 단일 인스턴스 가정을 깨는 후속 질문이 반드시 온다. 🔥(Deep-dive)
+> "재고 차감을 `synchronized` 로 막으면 되지 않나요?" → **서버가 2대 이상이면 JVM 락은 무력** 하다(프로세스 경계를 못 넘음). 분산 환경에선 **DB 제약·조건부 갱신·잠금 또는 키별 직렬화**로 모든 인스턴스가 같은 불변식을 지키게 한다. Redis 분산락은 Lease 만료 후 늦은 쓰기까지 막는지 별도 검증해야 한다. 단일 인스턴스 가정을 깨는 후속 질문이 반드시 온다. 🔥(Deep-dive)
 
 ## 5. Async · Non-blocking · 코루틴
 
 블로킹 I/O는 스레드를 점유한 채 대기한다. 다운스트림 호출이 느리면 스레드풀이 고갈된다. 해법은 **Non-blocking I/O** 또는 **경량 동시성**이다.
 
-- **CompletableFuture** — 콜백 체이닝, 블로킹 스레드 절약(별도 풀 필요)
+- **CompletableFuture** — 완료 결과를 조합하는 API다. 블로킹 작업을 별도 풀로 옮겨도 그 작업의 Worker는 점유되며, API 자체가 I/O를 Non-blocking으로 바꾸지는 않는다.
 - **WebFlux / Reactor** — 이벤트 루프 기반 Non-blocking, 적은 스레드로 높은 동시성. 단 학습·디버깅 비용 큼
-- **Kotlin Coroutine** — `suspend` 함수로 동기 코드처럼 작성, 구조적 동시성. **코루틴 안에서 블로킹 호출 금지**(이벤트 루프 막힘)
+- **Kotlin Coroutine** — `suspend` 함수로 동기 코드처럼 작성, 구조적 동시성. 블로킹 호출은 사용하는 Dispatcher와 동시성 한도를 확인해야 한다
 - **Java 21 Virtual Thread** — 블로킹 코드 그대로 두고 경량 스레드로 확장(Project Loom)
 
 ```kotlin
@@ -156,14 +156,14 @@ suspend fun getOrderDetail(id: Long): OrderDetail = coroutineScope {
 
 ### 해법 1 — DB 원자적 조건부 UPDATE (1순위 추천)
 
-```sql
-// 가장 단순·강력. 락을 DB에 위임하고 race 자체를 제거
+```kotlin
+// JPA Repository 예시: 호출 서비스의 트랜잭션 안에서 실행한다.
 @Modifying
 @Query("""
     UPDATE product
     SET stock = stock - :qty
-    WHERE id = :id AND stock >= :qty
-""")
+    WHERE id = :id AND :qty > 0 AND stock >= :qty
+""", nativeQuery = true)
 fun decreaseStock(id: Long, qty: Int): Int   // 영향받은 행 수 반환
 
 // 호출부 — 0이면 재고 부족
@@ -171,11 +171,11 @@ val updated = repository.decreaseStock(id, qty)
 if (updated == 0) throw InsufficientStockException(id)
 ```
 
-*`stock >= qty` 조건이 원자적으로 평가·갱신되어 Lost Update·Oversell 불가. 단일 SKU 경합에 가장 효율적*
+*양수 수량과 충분한 재고를 같은 문장에서 검사한다. 영향 행 수와 커밋 결과를 확인하고, 같은 주문 재시도의 중복 차감은 별도 고유 예약 키로 막는다. UPDATE도 트랜잭션 종료까지 잠금을 보유할 수 있다.*
 
 ### 해법 2 — 낙관적 락 (@Version)
 
-```sql
+```kotlin
 @Entity
 class Product(
     @Id val id: Long,
@@ -187,34 +187,38 @@ class Product(
            backoff = Backoff(delay = 50, multiplier = 2.0))   // 재시도 + backoff
 @Transactional
 fun decrease(id: Long, qty: Int) {
+    require(qty > 0)
     val p = repository.findById(id).orElseThrow()
     if (p.stock < qty) throw InsufficientStockException(id)
     p.stock -= qty   // 커밋 시 version 안 맞으면 예외 → 재시도
 }
 ```
 
-*경합 낮을 때 좋음. 경합 심하면 재시도 폭증하므로 인기상품엔 부적합*
+*버전 충돌 재시도는 새 트랜잭션에서 다시 읽어야 한다. Retry가 트랜잭션 전체를 감싸는지 프록시 순서와 예외 변환을 검증한다. 버전 기반 UPDATE도 DB 잠금을 사용하며, 품절 같은 업무 실패는 재시도하지 않는다.*
 
 ### 해법 3 — 비관적 락 (SELECT … FOR UPDATE)
 
-```sql
+```kotlin
 @Lock(LockModeType.PESSIMISTIC_WRITE)
 @Query("SELECT p FROM Product p WHERE p.id = :id")
 fun findByIdForUpdate(id: Long): Product
 // 락 타임아웃 필수 — 안 걸면 데드락/대기 폭주로 스레드풀 고갈
 ```
 
-### 해법 4 — Redis 원자 연산 (분산락 대안, 초고경합)
+### 해법 4 — Redis를 쓰기 전에 입장 제한을 검토한다
 
-```kotlin
-// 플래시세일처럼 DB가 못 버틸 때 — Redis DECRBY로 선차감 후 비동기 정산
-val remain = redisTemplate.opsForValue().decrement("stock:$id", qty.toLong())
-if (remain != null && remain < 0) {
-    redisTemplate.opsForValue().increment("stock:$id", qty.toLong())  // 보상
-    throw InsufficientStockException(id)
-}
-// 차감 성공 → 주문 이벤트 발행 → DB는 비동기로 최종 정산 (eventual consistency)
+단순 `DECRBY → 음수이면 INCRBY`는 검사·보상 사이 장애에 취약하다. Lua로 수량 검사와 감소를 묶어도 Redis 반영과 외부 큐 발행은 같은 트랜잭션이 아니다. 응답 유실 후 재실행할 예약 ID, 복제 장애 후 기록 소실, 미반영 DB 대사를 설계해야 한다.
+
+```text
+first: measure DB hot-row wait and admit a bounded request rate
+if Redis reservation is required:
+    atomically check request identity and available quantity
+    retain reservation result and durable delivery intent
+    retry delivery, not an untracked decrement
+    reconcile uncertain state before confirming the order
 ```
+
+> **실무 함정** — 위 코드는 설계 의사코드이며 Redis와 Kafka의 원자 커밋을 뜻하지 않는다. 그 보장 경계를 구현할 수 없다면 Redis는 입장 제한에 사용하고 최종 예약은 DB에서 확정한다.
 
 ```mermaid
 flowchart TD
@@ -222,7 +226,7 @@ flowchart TD
     Q -->|"낮음"| OPT["낙관적 락\n@Version + 재시도"]
     Q -->|"보통~높음\n단일 SKU"| ATOM["원자적 조건부\nUPDATE (1순위)"]
     Q -->|"복합 연산\n다중 행"| PESS["비관적 락\nFOR UPDATE"]
-    Q -->|"플래시세일\n초당 수만"| REDIS["Redis DECRBY\n+ 비동기 정산"]
+    Q -->|"플래시세일\n초당 수만"| REDIS["입장 제한 우선\nRedis는 내구성·멱등성 검증 후"]
     style ATOM fill:#dcfce7,stroke:#22c55e
     style REDIS fill:#fee2e2,stroke:#ef4444
 ```
@@ -231,4 +235,12 @@ flowchart TD
 
 > **🎯 면접 포인트 — 정답은 하나가 아니다**
 >
-> "재고 차감 어떻게 하시겠어요?"의 만점 답: **(1) 단일 SKU·일반 경합 → 원자적 조건부 UPDATE, (2) 멀티 라인 복합 → 비관적 락, (3) 플래시세일 → Redis 선차감 + 최종 일관성** . 그리고 "예약(Reserve)·만료(TTL)·확정(Commit) 3단계로 Oversell을 막는다"까지 연결하면 도메인 깊이가 드러난다. 🔥(Deep-dive)
+> "재고 차감 어떻게 하시겠어요?"의 만점 답: **(1) 단일 수량 조건 → 조건부 UPDATE, (2) 읽은 값에 의존하는 복합 조건 → 잠금·격리 경계 검토, (3) 유입 과다 → 입장 제한·큐와 측정 후 Redis 예약의 실패 모델 검토** . 그리고 "예약(Reserve)·만료(TTL)·확정(Commit) 3단계로 Oversell을 막는다"까지 연결하면 도메인 깊이가 드러난다. 🔥(Deep-dive)
+
+> **검수 기준 — 2026-09-12**: JVM 변수의 원자성과 DB 트랜잭션의 원자성은 다른 경계다. 예약 만료는 상태 조건부 전이와 수량 복원을 함께 커밋하고, JVM 밖의 다른 Writer도 같은 규칙에 참여해야 한다.
+
+## 참고
+
+- [Java 25 JLS 17: Threads and Locks](https://docs.oracle.com/javase/specs/jls/se25/html/jls-17.html)
+- [HikariCP: About Pool Sizing](https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing)
+- [Redis Lua](https://redis.io/docs/latest/develop/programmability/eval-intro/), [복제](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/)
