@@ -2,13 +2,13 @@
 
 ## 점검 범위와 판정 원칙
 
-저장소의 수동 카드 129개 전체에 대해 프론트매터·목차·본문 구조·출처 링크·질문별 해설 연결을 조사했다. 이는 운영 DB 전수 조회나 129개 전체 문장의 사실 검증을 완료했다는 뜻이 아니다. **27개는 본문·질문 3개를 대조해 심층 보강했고, 5개는 확인한 오류 구간만 정정했다. 나머지 97개는 구조 점검 상태**로 남긴다. 기존 10개 해설의 과거 검수와 이번 검수도 구분한다.
+저장소의 수동 카드 129개 전체에 대해 프론트매터·목차·본문 구조·출처 링크·질문별 해설 연결을 조사했다. 이는 운영 DB 전수 조회나 129개 전체 문장의 사실 검증을 완료했다는 뜻이 아니다. **30개는 본문·질문 3개를 대조해 심층 보강했고, 5개는 확인한 오류 구간만 정정했다. 나머지 94개는 구조 점검 상태**로 남긴다. 기존 10개 해설의 과거 검수와 이번 검수도 구분한다.
 
 분량 2,000자는 보강 후보를 찾는 신호이며 합격 기준이 아니다. 긴 본문이나 참고 링크 하나가 정확성·완결성을 보장하지 않는다. 특히 외부 링크가 있어도 모든 기업 사례·수치가 그 출처에서 확인됐다고 간주하지 않는다. 모드별로 DESIGN은 요구·용량·데이터·실패·대안, INTERVIEW는 질문별 근거와 후속 압박, REVIEW는 문제 코드·반례·수정·검증을 확인해야 한다.
 
 ## 전체 기준선
 
-변경 전 본문 2,000자 미만 67개, 본문 HTTPS 출처가 있는 카드 23개, 질문별 점검 해설 10개/30문항이었다. 이번 변경은 카드 수를 늘리지 않고 본문 32개를 수정하고 신규 해설 24개/72문항을 추가했으며 기존 해설 3개/9문항도 갱신했다. 기존 카드의 slug·메타데이터·질문 순서·질문 문구는 변경하지 않았다.
+변경 전 본문 2,000자 미만 67개, 본문 HTTPS 출처가 있는 카드 23개, 질문별 점검 해설 10개/30문항이었다. 이번 변경은 카드 수를 늘리지 않고 본문 35개를 수정하고 신규 해설 27개/81문항을 추가했으며 기존 해설 3개/9문항도 갱신했다. 기존 카드의 slug·메타데이터·질문 순서·질문 문구는 변경하지 않았다.
 
 | 영역 | 카드 | 본문 2,000자 미만(변경 후) | 본문 출처 있음 | 질문별 해설 있음 |
 |---|---:|---:|---:|---:|
@@ -17,7 +17,7 @@
 | BACKEND_DEV | 15 | 8 | 7 | 4 |
 | CS | 11 | 5 | 1 | 0 |
 | DATABASE | 15 | 6 | 7 | 4 |
-| INFRA | 13 | 5 | 4 | 1 |
+| INFRA | 13 | 2 | 4 | 4 |
 | LOGISTICS | 19 | 0 | 10 | 11 |
 | SYSTEM_DESIGN | 26 | 5 | 9 | 9 |
 
@@ -59,7 +59,7 @@
 
 `ContentSeeder`는 기존 slug를 건너뛰므로 Markdown 수정만으로 기존 DB가 갱신되지 않는다. `V9__review_existing_content.sql`은 수정한 32개 MANUAL 카드의 `content_md`만 갱신한다. 새 DB에서는 이후 시더가 같은 본문을 적재한다. V8 및 기존 Flyway 파일은 수정하지 않는다.
 
-배포 시 API의 V9 적용과 Web의 해설 34개 배포가 모두 필요하다. 이번 작업에서는 운영 DB 변경·배포를 수행하지 않는다. 기존 질문·카드 ID를 바꾸지 않아 저장된 학습 기록과 답변 연결을 유지한다.
+V9 배치는 API와 Web에 모두 반영했다. 2026-09-13에 V9와 Web 해설 34개 배포를 완료했다. [배포 기록](deployment-2026-09-13.md)을 참고한다. 후속 V10 세 카드와 해설 37개/111문항은 배포 검증을 진행한다. 기존 질문·카드 ID를 바꾸지 않아 저장된 학습 기록과 답변 연결을 유지한다.
 
 검증 결과는 아래 별도 절에 기록한다. 본문의 SQL은 학습용 예제이며 실제 DB의 두 세션 실행·장애 주입은 별도 검증 범위다.
 
@@ -72,7 +72,7 @@
 - `git diff --check`: 통과. 수정 카드 32개의 프론트매터가 기준 커밋과 동일한 것도 확인했다.
 - CI Web 작업에 학습/본문 회귀 검사와 HLC 예제 검사를 추가했다. 새 CI 구성은 아직 원격 실행 전이다.
 
-PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시나리오를 검증했다. 문서 기준 버전 17에서의 실행, MySQL 8.4 실행, Spring 프록시 통합 실행, Redis 장애 주입·운영 V9 적용·모바일 Mermaid 렌더는 수행하지 않았다. Node에서 Mermaid 파싱을 시도했지만 DOMPurify의 브라우저 DOM 의존성으로 실행되지 않아 다이어그램 렌더 검증으로 계산하지 않는다.
+PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시나리오를 검증했다. 문서 기준 버전 17에서의 실행, MySQL 8.4 실행, Spring 프록시 통합 실행, Redis 장애 주입·모바일 Mermaid 렌더는 수행하지 않았다. 운영 V9 적용은 이후 배포에서 검증했다. Node에서 Mermaid 파싱을 시도했지만 DOMPurify의 브라우저 DOM 의존성으로 실행되지 않아 다이어그램 렌더 검증으로 계산하지 않는다.
 
 ## 2026-09-13 심층 검수 추가
 
@@ -109,6 +109,16 @@ PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시�
 
 - `infra-12-kubernetes-resource-management`: Kubernetes 1.34 Linux 컨테이너별 설정을 기준으로 Admission 기본값, Request/Limit과 CPU 가중치, OOM/노드 압박 축출, QoS의 한계, JVM 전체 메모리와 HPA Request 분모·노드 여유를 보강했다.
 - 신규 해설 1개/3문항으로 전체 **34개/102문항**이다. 8Gi 노드 과밀과 HPA 예제는 단순 가정 계산이다. 실제 Kubernetes 부하·OOM·축출·HPA 실행은 수행하지 않았다.
+
+## 2026-09-13 배포 후속 검수
+
+- `infra-09-kubernetes-storage`: Kubernetes 1.34 기준 RWO와 RWOP, 토폴로지/WaitForFirstConsumer, replica별 PVC와 데이터 복제의 차이, StatefulSet 보존/PV 회수 정책, 백업 복구를 보강했다.
+- 해설 전체는 35개/105문항이다. 이 후속 본문은 `V10__review_kubernetes_content.sql`로 분리하며 V9는 변경하지 않는다. 실제 CSI 장애·복원 시험은 수행하지 않았다.
+- 아래 기존 검증 기록은 V9 배치의 결과다. 배포 상태와 후속 검증은 별도 배포 기록에서 구분한다.
+
+## Kubernetes 네트워킹·장애 면접 후속
+
+네트워킹과 장애 면접 2개를 추가 검수했다. EndpointSlice의 제어 정보와 패킷 경로, Pod Phase와 STATUS 이유, Admission 거절과 스케줄링/준비 실패, 이전 로그와 Probe, 동일 출발점 연결 비교를 보강했다. 해설 전체는 37개/111문항이며 스토리지와 함께 V10 세 카드로 배포한다. 실제 CNI·Probe 장애 주입은 수행하지 않았다.
 
 ## 카드별 점검표
 
@@ -194,10 +204,10 @@ PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시�
 | [infra-05-observability-stack](../apps/api/src/main/resources/content/infra-05-observability-stack.md) | CONCEPT · 3 | 5,463 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 |
 | [infra-06-sre-incident](../apps/api/src/main/resources/content/infra-06-sre-incident.md) | CONCEPT · 3 | 5,290 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 / 기업 언급 출처 확인 |
 | [infra-07-interview-incident](../apps/api/src/main/resources/content/infra-07-interview-incident.md) | INTERVIEW · 3 | 12,539 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 / 기업 언급 출처 확인 |
-| [infra-08-kubernetes-networking](../apps/api/src/main/resources/content/infra-08-kubernetes-networking.md) | CONCEPT · 4 | 1,905 | 구조 점검 | 짧은 본문 / 점검 해설 없음 |
-| [infra-09-kubernetes-storage](../apps/api/src/main/resources/content/infra-09-kubernetes-storage.md) | CONCEPT · 4 | 1,072 | 구조 점검 | 짧은 본문 / 점검 해설 없음 |
+| [infra-08-kubernetes-networking](../apps/api/src/main/resources/content/infra-08-kubernetes-networking.md) | CONCEPT · 4 | 3,617 | 심층 보강 | EndpointSlice 제어 정보·실제 전달 경로·정책·외부 노출 |
+| [infra-09-kubernetes-storage](../apps/api/src/main/resources/content/infra-09-kubernetes-storage.md) | CONCEPT · 4 | 4,023 | 심층 보강 | RWO/RWOP·영역 바인딩·PVC 보존/회수·복제/백업 |
 | [infra-10-commerce-spike-design](../apps/api/src/main/resources/content/infra-10-commerce-spike-design.md) | DESIGN · 5 | 1,007 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
-| [infra-11-kubernetes-troubleshooting-interview](../apps/api/src/main/resources/content/infra-11-kubernetes-troubleshooting-interview.md) | INTERVIEW · 4 | 1,270 | 구조 점검 | 짧은 본문 / 점검 해설 없음 |
+| [infra-11-kubernetes-troubleshooting-interview](../apps/api/src/main/resources/content/infra-11-kubernetes-troubleshooting-interview.md) | INTERVIEW · 4 | 4,423 | 심층 보강 | Phase/STATUS·미생성/미배정/준비·이전 로그·연결 비교 |
 | [infra-12-kubernetes-resource-management](../apps/api/src/main/resources/content/infra-12-kubernetes-resource-management.md) | CONCEPT · 4 | 4,379 | 심층 보강 | Admission·QoS·OOM/축출·HPA 분모·장애/배포 여유 |
 | [infra-13-warehouse-edge-design](../apps/api/src/main/resources/content/infra-13-warehouse-edge-design.md) | DESIGN · 5 | 982 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
 | [logistics-01-oms-order-management](../apps/api/src/main/resources/content/logistics-01-oms-order-management.md) | CONCEPT · 3 | 6,940 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 / 기업 언급 출처 확인 |

@@ -52,9 +52,9 @@ test('랜덤 정렬 키는 동일한 시드에서 복귀·재조회 후에도 �
 test('목차는 코드 펜스 안의 제목과 중복 질문 섹션을 제외한다', () => {
   assert.deepEqual(headings('## 1. **핵심**\n```md\n## 예시\n```\n## 이해도 확인\n'), [{ title: '1. 핵심', id: sectionId('1. 핵심') }]);
 });
-test('34개 카드의 102개 점검 기준은 실제 질문과 정확히 연결된다', () => {
+test('37개 카드의 111개 점검 기준은 실제 질문과 정확히 연결된다', () => {
   const guides = JSON.parse(readFileSync(path.join(web, 'content/answer-guides.json'), 'utf8'));
-  assert.equal(Object.keys(guides).length, 34);
+  assert.equal(Object.keys(guides).length, 37);
   for (const [slug, guide] of Object.entries(guides)) {
     const raw = readFileSync(path.join(root, `apps/api/src/main/resources/content/${slug}.md`), 'utf8');
     const questions = raw.split('---')[1].split('questions:\n')[1].trim().split('\n').map(line => JSON.parse(line.trim().slice(2)));
@@ -122,4 +122,16 @@ test('V9는 검수한 32개 MANUAL 카드의 본문만 갱신하고 원본과 �
     remainder = remainder.replace(statement, '');
   }
   assert.equal(remainder.replace(/^--.*$/gm, '').trim(), '', '검수 본문 UPDATE 외 SQL은 허용하지 않는다');
+});
+
+test('V10은 Kubernetes 세 카드의 본문만 반영한다', () => {
+  const directory = path.join(root, 'apps/api/src/main/resources');
+  const slugs = ['infra-08-kubernetes-networking', 'infra-09-kubernetes-storage', 'infra-11-kubernetes-troubleshooting-interview'];
+  const expected = slugs.map((slug, i) => {
+    const body = readFileSync(path.join(directory, `content/${slug}.md`), 'utf8').split('---').slice(2).join('---').trim();
+    const tag = `$k8s_review_${i}$`;
+    return `UPDATE cards\nSET content_md = ${tag}${body}${tag}\nWHERE slug = '${slug}' AND source = 'MANUAL';`;
+  }).join('\n');
+  const sql = readFileSync(path.join(directory, 'db/migration/V10__review_kubernetes_content.sql'), 'utf8');
+  assert.equal(sql.replace(/^--.*$/gm, '').trim(), expected);
 });

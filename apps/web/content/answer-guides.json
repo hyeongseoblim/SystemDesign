@@ -1646,5 +1646,163 @@
         "followUp": "8Gi 노드에 512Mi 요청 16개가 각각 768Mi를 쓰면 왜 문제가 되나요?"
       }
     ]
+  },
+  "infra-09-kubernetes-storage": {
+    "reviewedAt": "2026-09-13",
+    "scope": "Kubernetes 1.34 CSI 영속 볼륨. 실제 드라이버 지원은 별도 확인.",
+    "sources": [
+      {
+        "label": "Kubernetes 1.34 Persistent Volumes",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/storage/persistent-volumes/"
+      },
+      {
+        "label": "Kubernetes 1.34 StatefulSet",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/workloads/controllers/statefulset/"
+      },
+      {
+        "label": "Kubernetes 1.34 StorageClass",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/storage/storage-classes/"
+      }
+    ],
+    "questions": [
+      {
+        "question": "Pod가 재스케줄될 때 PVC 데이터가 유지되는 원리와 Zone 제약을 설명해보세요.",
+        "points": [
+          "Pod와 PVC/PV 수명은 분리되어 남은 PVC와 저장소를 대체 Pod가 재사용할 수 있다.",
+          "영역 디스크와 로컬 PV의 토폴로지·nodeAffinity를 확인하며 다른 Zone으로 자동 복제된다고 가정하지 않는다.",
+          "WaitForFirstConsumer와 배치 조건을 설명하고 이전 작성자 중단·연결 해제·마운트·애플리케이션 복구까지 확인한다."
+        ],
+        "pitfall": "PVC가 있으면 어느 노드에서도 즉시 같은 데이터로 시작할 수 있다는 답변.",
+        "followUp": "이전 노드가 죽은 게 아니라 네트워크만 단절됐다면 강제 재연결 전에 무엇을 확인하나요?"
+      },
+      {
+        "question": "StatefulSet의 VolumeClaimTemplate가 Replica별 저장소를 만드는 방식을 설명해보세요.",
+        "points": [
+          "volumeClaimTemplates의 각 템플릿이 Pod 식별자별 별도 PVC를 만들며 대체 Pod는 같은 PVC를 재사용한다.",
+          "replicas 3과 20Gi 템플릿은 총 60Gi 요청이지만 데이터 복제는 DB/Operator가 담당한다.",
+          "StatefulSet PVC 보존 정책과 PVC 삭제 뒤 PV 회수 정책을 구분하고 축소/재확장 시 데이터와 멤버십을 확인한다."
+        ],
+        "pitfall": "StatefulSet 복제 수를 늘리면 기존 데이터도 자동 복제된다는 답변.",
+        "followUp": "whenScaled=Delete와 PV Delete 정책에서 축소하면 어떤 데이터 수명이 달라지나요?"
+      },
+      {
+        "question": "ReadWriteOnce를 다중 노드 공유 볼륨으로 오해하면 어떤 장애가 생기나요?",
+        "points": [
+          "RWO는 한 노드 기준이며 같은 노드 여러 Pod의 접근이 가능하다.",
+          "다른 노드 동시 마운트는 연결 오류·대기를 일으킬 수 있고 드라이버별 지원을 확인한다.",
+          "RWX는 앱 동시 쓰기 정합성을 보장하지 않는다. 한 Pod 제약이 필요하면 RWOP와 앱 소유권을 검토한다."
+        ],
+        "pitfall": "RWO는 단일 Pod 락이거나 RWX면 여러 DB 작성자가 안전하다는 답변.",
+        "followUp": "동일 노드에 두 Pod가 배치되면 RWO만으로 중복 작성자를 막을 수 있나요?"
+      }
+    ]
+  },
+  "infra-08-kubernetes-networking": {
+    "reviewedAt": "2026-09-13",
+    "scope": "Kubernetes 1.34 기준. 데이터 플레인·CNI·컨트롤러별 동작은 별도 확인.",
+    "sources": [
+      {
+        "label": "Kubernetes 1.34 Service",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/services-networking/service/"
+      },
+      {
+        "label": "Kubernetes 1.34 EndpointSlice",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/services-networking/endpoint-slices/"
+      },
+      {
+        "label": "Kubernetes 1.34 NetworkPolicy",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/services-networking/network-policies/"
+      },
+      {
+        "label": "Kubernetes 1.34 Gateway API",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/services-networking/gateway/"
+      }
+    ],
+    "questions": [
+      {
+        "question": "Pod가 다른 Node의 Pod로 통신할 때 CNI가 제공해야 하는 기능과 Service가 필요하지 않은 이유를 설명해보세요.",
+        "points": [
+          "CNI 규약과 구현을 구분하고 Pod 인터페이스·주소·노드 간 라우팅/터널을 설명한다.",
+          "정책과 경로가 허용하면 Pod IP 직접 통신이 가능하며 Service는 주소 변화와 백엔드 발견을 추상화한다.",
+          "Service 없는 통신도 재생성·주소 변화와 NetworkPolicy 집행을 고려해야 한다."
+        ],
+        "pitfall": "CNI가 항상 같은 터널이나 정책을 제공하거나 Pod 통신에는 반드시 Service가 필요하다는 답변.",
+        "followUp": "같은 노드에서는 되고 다른 노드에서는 안 되면 무엇을 비교하나요?"
+      },
+      {
+        "question": "Service의 ClusterIP로 들어온 패킷이 EndpointSlice의 Pod까지 가는 경로를 kube-proxy 또는 대체 데이터 플레인 관점에서 설명해보세요.",
+        "points": [
+          "EndpointSlice는 주소·포트·조건의 제어 정보이며 패킷이 통과하는 프록시가 아니다.",
+          "kube-proxy 또는 대체 구현이 Service/EndpointSlice를 감시해 VIP에서 백엔드로 전달할 규칙을 만든다.",
+          "targetPort와 실제 수신 포트, 준비/종료 조건, 연결 추적과 Headless 등 예외를 확인한다."
+        ],
+        "pitfall": "매 HTTP 요청이 kube-proxy 프로세스와 EndpointSlice 서버를 순서대로 통과한다는 답변.",
+        "followUp": "긴 연결에서 일부 Pod에 부하가 집중되는 이유를 설명해보세요."
+      },
+      {
+        "question": "Ingress, Gateway API, LoadBalancer Service를 각각 어떤 요구사항에서 선택할지 비교해보세요.",
+        "points": [
+          "LoadBalancer Service는 외부 포트 기반 노출, Ingress는 HTTP 호스트/경로, Gateway API는 역할 분리와 지원 Route 기능을 비교한다.",
+          "리소스 작성과 컨트롤러 설치를 구분하고 버전·구현별 프로토콜/기능 지원을 확인한다.",
+          "TLS 종료·원본 IP·프록시 헤더·비용·소유권과 실제 백엔드 경로를 요구에 맞춰 선택한다."
+        ],
+        "pitfall": "Ingress가 Service 타입이거나 Gateway API 객체만 만들면 모든 기능이 실행된다는 답변.",
+        "followUp": "내부 Service는 되는데 외부 HTTPS만 실패하면 어떤 경계를 확인하나요?"
+      }
+    ]
+  },
+  "infra-11-kubernetes-troubleshooting-interview": {
+    "reviewedAt": "2026-09-13",
+    "scope": "Kubernetes 1.34 기준. 데이터 플레인·CNI·컨트롤러별 동작은 별도 확인.",
+    "sources": [
+      {
+        "label": "Kubernetes 1.34 Pod 수명",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+      },
+      {
+        "label": "Kubernetes 1.34 Pod 진단",
+        "url": "https://v1-34.docs.kubernetes.io/docs/tasks/debug/debug-application/debug-pods/"
+      },
+      {
+        "label": "Kubernetes 1.34 Service",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/services-networking/service/"
+      },
+      {
+        "label": "Kubernetes 1.34 Probe",
+        "url": "https://v1-34.docs.kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/"
+      }
+    ],
+    "questions": [
+      {
+        "question": "Pod가 Pending일 때 Scheduler Event에서 어떤 원인들을 순서대로 확인하나요?",
+        "points": [
+          "Pod 존재와 nodeName/PodScheduled를 먼저 확인하고 Pending에 배정 후 준비 시간도 포함될 수 있음을 설명한다.",
+          "미배정은 요청량·Taint·Affinity·Topology·PVC 제약을 노드별로 확인한다. 전체 여유 합계만으로 배치를 판단하지 않는다.",
+          "Pod 미생성은 컨트롤러/Admission/Quota, 배정 후 준비 실패는 이미지·CSI·CNI 이벤트로 구분한다."
+        ],
+        "pitfall": "Pending은 항상 CPU 부족이고 Quota 거절도 Scheduler 문제라는 답변.",
+        "followUp": "노드 4개에 CPU 1개씩 남는데 CPU 2개 요청 Pod는 왜 못 들어가나요?"
+      },
+      {
+        "question": "CrashLoopBackOff에서 현재 로그와 이전 컨테이너 로그를 모두 봐야 하는 이유는 무엇인가요?",
+        "points": [
+          "현재 인스턴스와 직전 실패 인스턴스의 로그를 구분하고 컨테이너명·재시작 횟수·lastState·종료 이유를 함께 수집한다.",
+          "--previous가 모든 과거 로그를 보장하지 않으며 137만으로 OOM을 확정하지 않는다.",
+          "정상 즉시 종료·설정·의존성·자원·Probe를 나눠 보고 Readiness 실패와 재시작을 유발하는 Probe를 구분한다."
+        ],
+        "pitfall": "CrashLoopBackOff는 Pod Phase이며 항상 OOM이고 현재 로그만 보면 된다는 답변.",
+        "followUp": "Readiness 실패를 Liveness 실패와 같은 재시작 원인으로 볼 수 있나요?"
+      },
+      {
+        "question": "Service DNS는 되지만 연결이 실패할 때 Endpoint부터 CNI까지 진단 순서를 설명해보세요.",
+        "points": [
+          "DNS 성공은 주소 해석뿐이므로 Service 포트/selector와 EndpointSlice 주소·조건을 확인한다.",
+          "동일 출발점에서 Pod IP와 Service IP 연결을 비교하고 Pod도 실패하면 수신 프로세스·정책·경로를 좁힌다.",
+          "노드 간 차이·주소군·CNI·VIP 규칙과 연결 추적을 비교하며 내부 성공/외부 실패는 외부 프록시·TLS를 따로 확인한다."
+        ],
+        "pitfall": "DNS가 되면 네트워크는 정상이고 Service 실패는 무조건 kube-proxy라는 답변.",
+        "followUp": "노트북 Pod IP 호출 실패와 클러스터 내 Pod 호출 실패는 같은 증거인가요?"
+      }
+    ]
   }
 }
