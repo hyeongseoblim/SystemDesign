@@ -1874,5 +1874,59 @@
         "followUp": "버전 15 다음에 17이 도착하면 Delta 소비자와 Snapshot 소비자는 각각 어떻게 하나요?"
       }
     ]
+  },
+  "backend-architecture-01-msa-vs-monolith": {
+    "reviewedAt": "2026-09-13",
+    "scope": "본문·질문 3개 심층 검수. 가상 가용성 계산과 이전 절차이며 실제 시스템 장애 시험은 별도다.",
+    "sources": [
+      {
+        "label": "Database per service: 논리적 데이터 소유권",
+        "url": "https://microservices.io/patterns/data/database-per-service.html"
+      },
+      {
+        "label": "Microsoft: Strangler Fig 패턴",
+        "url": "https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig"
+      },
+      {
+        "label": "Google SRE: 가용성의 시간 환산",
+        "url": "https://sre.google/sre-book/availability-table/"
+      },
+      {
+        "label": "Lewis·Fowler: Microservices",
+        "url": "https://martinfowler.com/articles/microservices.html"
+      }
+    ],
+    "questions": [
+      {
+        "question": "\"DB를 공유하는 MSA\"가 왜 **Distributed Monolith**인지, 그리고 데이터 소유권(SSOT)을 분리하면 어떤 문제(이중 쓰기 등)가 새로 생기고 어떻게 푸는지 설명해보세요.",
+        "points": [
+          "물리 DB 서버 공유와 테이블·업무 규칙 공유를 구분하고 권한으로 논리적 소유권을 지킬 수 있음을 설명한다.",
+          "여러 서비스의 직접 쓰기·내부 스키마 의존·동시 배포가 반복되는지 확인한다.",
+          "소유권 분리 후 예약 상태·Outbox·Saga·조회 지연을 설계하고 분산 원자성으로 과장하지 않는다."
+        ],
+        "pitfall": "DB 서버를 서비스마다 한 대씩 만들어야만 MSA라고 단정하지 않는다.",
+        "followUp": "같은 DB 서버에서 서비스별 스키마와 권한을 나눴다면 어떤 결합과 장애 위험이 남나요?"
+      },
+      {
+        "question": "각 서비스 가용성이 99.9%인 5개 서비스를 **동기 직렬 체인**으로 호출하면 전체 가용성은? 이 수치를 어떻게 개선할지 구체 패턴 3가지를 제시해보세요.",
+        "points": [
+          "모두 필수·같은 기준·독립 성공이라는 가정에서 0.999의 5제곱은 약 99.5010%라고 계산한다.",
+          "상관 실패와 시간/요청 SLI를 구분하고 p99 다섯 개만으로 종단 p99를 정할 수 없음을 설명한다.",
+          "비필수 작업 비동기화, 기한·서킷·격벽, 허용된 캐시/대체 응답을 제시하며 필수 업무 성공과 구분한다."
+        ],
+        "pitfall": "서킷 브레이커가 죽은 결제를 성공으로 바꾸거나 곱셈 결과가 무조건 실제 연간 장애 시간이라고 말하지 않는다.",
+        "followUp": "다섯 서비스가 같은 DB 장애 때만 동시에 실패하면 가용성 곱셈이 맞나요?"
+      },
+      {
+        "question": "물류 모놀리스를 MSA로 전환한다면, **Strangler Fig**로 어떤 순서로 어떤 모듈부터 떼어낼지 정하고 그 근거(경계·결합·확장 특성)를 설명해보세요. 주문-결제-재고 핵심 트랜잭션을 마지막에 두는 이유도.",
+        "points": [
+          "가정한 부하·결합·소유권을 근거로 배송 조회 같은 후보를 고르고 고정 순서로 단정하지 않는다.",
+          "백필과 후속 변경의 연결·대조, 점진 라우팅, 쓰기 소유권 전환과 기존 요청 정리를 단계화한다.",
+          "핵심 불변 조건은 신중히 이전하고 새 쓰기 후 롤백에는 데이터 동기화·호환·대사가 필요함을 설명한다."
+        ],
+        "pitfall": "핵심은 반드시 마지막이거나 프록시 원복만으로 쓰기 이후 롤백이 끝난다고 단정하지 않는다.",
+        "followUp": "신규 서비스에서 주문을 받은 뒤 옛 DB로 돌아가려면 무엇을 확인해야 하나요?"
+      }
+    ]
   }
 }

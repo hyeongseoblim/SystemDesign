@@ -1,22 +1,6 @@
----
-area: BACKEND_ARCHITECTURE
-mode: CONCEPT
-coach: backend-architecture-coach
-title: "Modular Monolith vs MSA — 분리 기준과 마이그레이션 전략"
-slug: backend-architecture-01-msa-vs-monolith
-difficulty: 3
-summary: "\"MSA가 좋다\"는 단정은 면접에서 감점이다. **언제 쪼개고, 언제 합쳐 두는가**의 판단 기준과 Trade-off를 그림으로 정리한다. Deep-dive 주제는 🔥(Deep-dive) 로 표시."
-tags:
-  - "MSA"
-  - "Modular Monolith"
-  - "서비스 분리"
-  - "마이그레이션 전략"
-questions:
-  - "\"DB를 공유하는 MSA\"가 왜 **Distributed Monolith**인지, 그리고 데이터 소유권(SSOT)을 분리하면 어떤 문제(이중 쓰기 등)가 새로 생기고 어떻게 푸는지 설명해보세요."
-  - "각 서비스 가용성이 99.9%인 5개 서비스를 **동기 직렬 체인**으로 호출하면 전체 가용성은? 이 수치를 어떻게 개선할지 구체 패턴 3가지를 제시해보세요."
-  - "물류 모놀리스를 MSA로 전환한다면, **Strangler Fig**로 어떤 순서로 어떤 모듈부터 떼어낼지 정하고 그 근거(경계·결합·확장 특성)를 설명해보세요. 주문-결제-재고 핵심 트랜잭션을 마지막에 두는 이유도."
----
-## 1. 배포 단위와 데이터 소유권을 나눠 본다
+-- MSA 비교 카드 후속 심층 검수. 기존 ID와 질문 유지.
+UPDATE cards
+SET content_md = $boundary_review$## 1. 배포 단위와 데이터 소유권을 나눠 본다
 
 Modular Monolith는 하나의 배포 단위 안에서 모듈 경계를 지키는 구조다. MSA는 서비스별 변경·배포·운영의 독립성을 지향한다. 프로세스 개수만 늘려도 독립성이 생기는 것은 아니다. 내부 API를 우회하는 테이블 접근과 동시에 올려야 하는 버전 의존성이 남으면 분산된 채로 함께 변경해야 한다.
 
@@ -121,4 +105,5 @@ flowchart TD
 - [Database per service: 논리적 데이터 소유권](https://microservices.io/patterns/data/database-per-service.html)
 - [Microsoft: Strangler Fig 패턴](https://learn.microsoft.com/en-us/azure/architecture/patterns/strangler-fig)
 - [Google SRE: 가용성의 시간 환산](https://sre.google/sre-book/availability-table/)
-- [Lewis·Fowler: Microservices](https://martinfowler.com/articles/microservices.html)
+- [Lewis·Fowler: Microservices](https://martinfowler.com/articles/microservices.html)$boundary_review$
+WHERE slug = 'backend-architecture-01-msa-vs-monolith' AND source = 'MANUAL';

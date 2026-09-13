@@ -2,18 +2,18 @@
 
 ## 점검 범위와 판정 원칙
 
-저장소의 수동 카드 129개 전체에 대해 프론트매터·목차·본문 구조·출처 링크·질문별 해설 연결을 조사했다. 이는 운영 DB 전수 조회나 129개 전체 문장의 사실 검증을 완료했다는 뜻이 아니다. **32개는 본문·질문 3개를 대조해 심층 보강했고, 3개는 확인한 오류 구간만 정정했다. 나머지 94개는 구조 점검 상태**로 남긴다. 기존 10개 해설의 과거 검수와 이번 검수도 구분한다.
+저장소의 수동 카드 129개 전체에 대해 프론트매터·목차·본문 구조·출처 링크·질문별 해설 연결을 조사했다. 이는 운영 DB 전수 조회나 129개 전체 문장의 사실 검증을 완료했다는 뜻이 아니다. **33개는 본문·질문 3개를 대조해 심층 보강했고, 2개는 확인한 오류 구간만 정정했다. 나머지 94개는 구조 점검 상태**로 남긴다. 기존 10개 해설의 과거 검수와 이번 검수도 구분한다.
 
 분량 2,000자는 보강 후보를 찾는 신호이며 합격 기준이 아니다. 긴 본문이나 참고 링크 하나가 정확성·완결성을 보장하지 않는다. 특히 외부 링크가 있어도 모든 기업 사례·수치가 그 출처에서 확인됐다고 간주하지 않는다. 모드별로 DESIGN은 요구·용량·데이터·실패·대안, INTERVIEW는 질문별 근거와 후속 압박, REVIEW는 문제 코드·반례·수정·검증을 확인해야 한다.
 
 ## 전체 기준선
 
-변경 전 본문 2,000자 미만 67개, 본문 HTTPS 출처가 있는 카드 23개, 질문별 점검 해설 10개/30문항이었다. 이번 변경은 카드 수를 늘리지 않고 본문 35개를 수정하고 신규 해설 28개/84문항을 추가했으며 기존 해설 3개/9문항도 갱신했다. 기존 카드의 slug·메타데이터·질문 순서·질문 문구는 변경하지 않았다.
+변경 전 본문 2,000자 미만 67개, 본문 HTTPS 출처가 있는 카드 23개, 질문별 점검 해설 10개/30문항이었다. 이번 변경은 카드 수를 늘리지 않고 본문 35개를 수정하고 신규 해설 29개/87문항을 추가했으며 기존 해설 3개/9문항도 갱신했다. 기존 카드의 slug·메타데이터·질문 순서·질문 문구는 변경하지 않았다.
 
 | 영역 | 카드 | 본문 2,000자 미만(변경 후) | 본문 출처 있음 | 질문별 해설 있음 |
 |---|---:|---:|---:|---:|
 | AI | 15 | 15 | 8 | 1 |
-| BACKEND_ARCHITECTURE | 15 | 7 | 5 | 5 |
+| BACKEND_ARCHITECTURE | 15 | 7 | 6 | 6 |
 | BACKEND_DEV | 15 | 8 | 7 | 4 |
 | CS | 11 | 5 | 1 | 0 |
 | DATABASE | 15 | 6 | 7 | 4 |
@@ -156,7 +156,7 @@ PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시�
 | [backend-13-jvm-incident-interview](../apps/api/src/main/resources/content/backend-13-jvm-incident-interview.md) | INTERVIEW · 4 | 1,048 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
 | [backend-14-thread-pool-sizing](../apps/api/src/main/resources/content/backend-14-thread-pool-sizing.md) | CONCEPT · 4 | 967 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
 | [backend-15-file-streaming-design](../apps/api/src/main/resources/content/backend-15-file-streaming-design.md) | DESIGN · 4 | 1,047 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
-| [backend-architecture-01-msa-vs-monolith](../apps/api/src/main/resources/content/backend-architecture-01-msa-vs-monolith.md) | CONCEPT · 3 | 7,182 | 부분 정정 | 출처 없는 지연·인력 배수 제거; 기업 사례는 후속 검수 |
+| [backend-architecture-01-msa-vs-monolith](../apps/api/src/main/resources/content/backend-architecture-01-msa-vs-monolith.md) | CONCEPT · 3 | 4,416 | 심층 보강 | 논리/물리 DB·가용성 독립 가정·p99·쓰기 전환과 롤백 |
 | [backend-architecture-02-ddd](../apps/api/src/main/resources/content/backend-architecture-02-ddd.md) | CONCEPT · 3 | 7,025 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 |
 | [backend-architecture-03-event-driven](../apps/api/src/main/resources/content/backend-architecture-03-event-driven.md) | CONCEPT · 3 | 4,183 | 심층 보강 | 스키마 호환 방향·흐름 소유권·Delta/Snapshot·버전 누락과 재처리 |
 | [backend-architecture-04-saga](../apps/api/src/main/resources/content/backend-architecture-04-saga.md) | CONCEPT · 4 | 5,569 | 심층 보강 | 2PC 경계·Pivot·외부 결제 명령·상태/Outbox 원자성 |
@@ -261,3 +261,9 @@ PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시�
 기존 부분 정정 2개를 심층 검수로 전환했다. 출처 없는 기업 사례·무조건 유실율 0·단계 수만으로 조정 방식 선택·필드 추가 무조건 호환 설명을 제거했다. 실패 복구 표, 이벤트 ID/파티션 키 구분, 버전 누락과 Snapshot/Delta 계약, 외부 API 결과 불명 처리를 보강했다.
 
 누적 심층 32개·부분 3개, 해설 38개/114문항이다. 본문을 변경한 고유 카드 수는 35개로 동일하다. V11에 후속 본문을 분리하고 배포된 V9/V10은 유지한다. 실제 Kafka·CDC·외부 API 장애 주입은 수행하지 않았다.
+
+## 2026-09-13 MSA 비교 후속 심층 검수
+
+물리 DB 공유와 데이터 소유권, 가용성 곱셈의 독립 가정, 시간/요청 SLI, 종단 p99 추론의 한계를 정정했다. 고정 팀 수·무조건 핵심 마지막·라우팅만으로 롤백한다는 설명을 가상 조건과 데이터 이전 절차로 보강했다. 출처 없는 기업 사례를 제거했다.
+
+누적 심층 33개·부분 2개, 고유 변경 본문 35개, 해설 39개/117문항이다. V12로 후속 반영한다. 본문의 Python 계산을 실행해 99.5010%·43.71시간을 확인했고 실제 부하·장애 검증으로 계산하지 않는다.
