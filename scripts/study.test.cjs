@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const web = path.join(root, 'apps/web');
@@ -52,9 +53,9 @@ test('랜덤 정렬 키는 동일한 시드에서 복귀·재조회 후에도 �
 test('목차는 코드 펜스 안의 제목과 중복 질문 섹션을 제외한다', () => {
   assert.deepEqual(headings('## 1. **핵심**\n```md\n## 예시\n```\n## 이해도 확인\n'), [{ title: '1. 핵심', id: sectionId('1. 핵심') }]);
 });
-test('37개 카드의 111개 점검 기준은 실제 질문과 정확히 연결된다', () => {
+test('38개 카드의 114개 점검 기준은 실제 질문과 정확히 연결된다', () => {
   const guides = JSON.parse(readFileSync(path.join(web, 'content/answer-guides.json'), 'utf8'));
-  assert.equal(Object.keys(guides).length, 37);
+  assert.equal(Object.keys(guides).length, 38);
   for (const [slug, guide] of Object.entries(guides)) {
     const raw = readFileSync(path.join(root, `apps/api/src/main/resources/content/${slug}.md`), 'utf8');
     const questions = raw.split('---')[1].split('questions:\n')[1].trim().split('\n').map(line => JSON.parse(line.trim().slice(2)));
@@ -76,9 +77,12 @@ test('V8은 검수 본문을 정확히 반영하고 기존 질문·카드 ID를 
 });
 
 // SQL 본문은 마크다운 코드 예제도 포함하므로 UPDATE 바깥 구조만 파싱한다.
-test('V9는 검수한 32개 MANUAL 카드의 본문만 갱신하고 원본과 일치한다', () => {
+test('V9는 배포된 원본을 유지하고 V11 후속 본문까지 원본과 연결된다', () => {
   const directory = path.join(root, 'apps/api/src/main/resources');
   const sql = readFileSync(path.join(directory, 'db/migration/V9__review_existing_content.sql'), 'utf8');
+  assert.equal(createHash('sha256').update(sql).digest('hex'), 'c5fa68863f1571117022189094bf99cc4ef3b89892da047bcc4c106ed61ca001', '배포된 V9는 변경하지 않는다');
+  const followup = readFileSync(path.join(directory, 'db/migration/V11__review_event_content.sql'), 'utf8');
+  const latest = new Map([...followup.matchAll(/UPDATE cards\nSET content_md = (\$event_review_\d+\$)([\s\S]*?)\1\nWHERE slug = '([^']+)' AND source = 'MANUAL';/g)].map(m => [m[3], m[2]]));
   const statements = [...sql.matchAll(/UPDATE cards\nSET content_md = (\$review_\d+\$)([\s\S]*?)\1\nWHERE slug = '([^']+)' AND source = 'MANUAL';/g)];
   const expected = [
     'backend-02-concurrency',
@@ -118,7 +122,7 @@ test('V9는 검수한 32개 MANUAL 카드의 본문만 갱신하고 원본과 �
   let remainder = sql;
   for (const [statement, , body, slug] of statements) {
     const source = readFileSync(path.join(directory, `content/${slug}.md`), 'utf8').split('---').slice(2).join('---').trim();
-    assert.equal(body, source, slug);
+    assert.equal(latest.get(slug) ?? body, source, slug);
     remainder = remainder.replace(statement, '');
   }
   assert.equal(remainder.replace(/^--.*$/gm, '').trim(), '', '검수 본문 UPDATE 외 SQL은 허용하지 않는다');
@@ -133,5 +137,17 @@ test('V10은 Kubernetes 세 카드의 본문만 반영한다', () => {
     return `UPDATE cards\nSET content_md = ${tag}${body}${tag}\nWHERE slug = '${slug}' AND source = 'MANUAL';`;
   }).join('\n');
   const sql = readFileSync(path.join(directory, 'db/migration/V10__review_kubernetes_content.sql'), 'utf8');
+  assert.equal(sql.replace(/^--.*$/gm, '').trim(), expected);
+});
+
+test('V11은 이벤트 두 카드의 본문만 정확히 반영한다', () => {
+  const directory = path.join(root, 'apps/api/src/main/resources');
+  const slugs = ['backend-architecture-03-event-driven', 'backend-architecture-06-outbox-idempotency'];
+  const expected = slugs.map((slug, i) => {
+    const body = readFileSync(path.join(directory, `content/${slug}.md`), 'utf8').split('---').slice(2).join('---').trim();
+    const tag = `$event_review_${i}$`;
+    return `UPDATE cards\nSET content_md = ${tag}${body}${tag}\nWHERE slug = '${slug}' AND source = 'MANUAL';`;
+  }).join('\n');
+  const sql = readFileSync(path.join(directory, 'db/migration/V11__review_event_content.sql'), 'utf8');
   assert.equal(sql.replace(/^--.*$/gm, '').trim(), expected);
 });

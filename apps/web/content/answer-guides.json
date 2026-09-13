@@ -330,44 +330,60 @@
     ]
   },
   "backend-architecture-06-outbox-idempotency": {
-    "reviewedAt": "2026-09-08",
-    "scope": "릴레이 재시도와 영속 저장소 복구를 전제로 한 패턴. 무조건적인 유실 0을 뜻하지 않는다.",
+    "reviewedAt": "2026-09-13",
+    "scope": "본문과 기존 질문 3개 심층 검수. 설계 예제이며 실제 브로커·외부 API 장애 주입은 별도다.",
     "sources": [
       {
-        "label": "Transactional Outbox / Chris Richardson",
+        "label": "Transactional Outbox 패턴",
         "url": "https://microservices.io/patterns/data/transactional-outbox.html"
+      },
+      {
+        "label": "Debezium Outbox Event Router",
+        "url": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html"
+      },
+      {
+        "label": "Kafka 4.1 전달·트랜잭션 설계",
+        "url": "https://kafka.apache.org/41/design/design/"
+      },
+      {
+        "label": "Kafka 4.1 Producer 설정",
+        "url": "https://kafka.apache.org/41/configuration/producer-configs/"
+      },
+      {
+        "label": "Stripe 멱등 요청 계약",
+        "url": "https://docs.stripe.com/api/idempotent_requests"
       }
     ],
     "questions": [
       {
         "question": "\"재고를 차감하고 `InventoryReserved`를 Kafka에 발행\"하는 코드에서 발행 직전 크래시 시 발생하는 문제를 설명하고, **Transactional Outbox**가 이를 어떻게 해결하는지 트랜잭션 경계를 그려 설명해보세요.",
         "points": [
-          "DB 커밋 뒤 프로세스가 종료되면 직접 발행할 이벤트가 브로커에 도달하지 않을 수 있다.",
-          "비즈니스 변경과 Outbox 레코드를 하나의 로컬 DB 트랜잭션으로 커밋한다.",
-          "별도 릴레이가 미처리 이벤트를 읽어 발행하고 재시도한다. 미발행 적체와 실패를 관측한다."
+          "DB 커밋 전후와 브로커 발행 전후의 장애를 나눠 유실·유령 이벤트를 설명한다.",
+          "예약 성공 확인과 Outbox INSERT를 같은 DB 트랜잭션에 넣고 실패하면 모두 롤백한다.",
+          "릴레이가 커밋된 발행 의도를 재시도하며 명령 중복은 reservationId 같은 업무 키로 별도 차단한다."
         ],
-        "pitfall": "try-catch만 추가하거나 원격 브로커 발행이 로컬 DB 롤백과 함께 취소된다고 설명하는 답변.",
-        "followUp": "Outbox 테이블이 계속 커지면 어떤 지표와 정리 정책이 필요한가요?"
+        "pitfall": "Outbox는 DB와 브로커의 동시 커밋이 아니며 조건부 재고 변경 실패에도 성공 이벤트를 넣으면 안 된다.",
+        "followUp": "예약 명령 자체가 재시도될 때 Outbox만으로 재고의 두 번 차감을 막을 수 있나요?"
       },
       {
         "question": "Outbox는 \"유실 0\"은 보장하지만 \"중복 0\"은 보장하지 못합니다. 왜 그런지(릴레이 At-least-once) 설명하고, 소비 측에서 **Inbox/멱등성**으로 어떻게 중복을 흡수하는지 설명해보세요.",
         "points": [
-          "발행 성공 뒤 완료 표시 전에 죽으면 릴레이가 동일 이벤트를 다시 보낼 수 있다.",
-          "소비자 Inbox의 고유 이벤트 ID 기록과 비즈니스 변경을 같은 트랜잭션으로 처리한다.",
-          "외부 API 부작용에는 별도 멱등키·상태 확인이 필요하며 전달 보장은 저장 내구성·재시도 운영 조건에 의존한다."
+          "질문의 유실 0은 조건부 표현이며 DB 내구성·로그 보존·릴레이와 소비 복구가 필요함을 먼저 짚는다.",
+          "발행 성공 뒤 완료 표시 전 장애는 같은 eventId의 중복 발행을 만들 수 있다.",
+          "Inbox 삽입 성공 여부로 분기하고 업무 효과와 함께 커밋하며 보존 기간과 업무 키 중복도 관리한다."
         ],
-        "pitfall": "Inbox ID부터 별도 커밋하면 뒤의 업무 실패도 안전하게 재시도된다는 답변.",
-        "followUp": "중복 제거 기록을 언제 삭제해도 안전한가요?"
+        "pitfall": "eventId를 Kafka 키로 주는 것만으로 중복 제거와 Aggregate 순서가 모두 보장되는 것은 아니다.",
+        "followUp": "브로커 재생 기간보다 Inbox 키를 빨리 지우면 무엇이 달라지나요?"
       },
       {
         "question": "\"Kafka가 exactly-once를 지원하니 멱등성은 필요 없다\"는 주장이 왜 틀린지, **delivery와 processing의 차이** 그리고 ack 유실 시나리오를 들어 반박해보세요.",
         "points": [
-          "브로커 내부의 exactly-once 적용 범위와 외부 DB·HTTP 부작용을 구분한다.",
-          "ACK 유실로 재전달되어도 같은 비즈니스 결과가 나도록 멱등 처리한다.",
-          "커밋된 소비 위치와 업무 결과의 일관성을 설계하고 장애 지점별 재실행을 확인한다."
+          "응답 유실 시 미저장과 저장 후 응답 유실을 구분하기 어려워 재시도가 발생함을 설명한다.",
+          "Kafka 출력과 소비 위치의 트랜잭션 및 read_committed 경계를 설명하고 Producer 멱등성과 구분한다.",
+          "외부 API는 안정된 업무 키·발급 의도·결과 조회·대사로 관리하고 로컬 Inbox만으로 원격 효과를 보장하지 않는다."
         ],
-        "pitfall": "Kafka 설정 하나로 외부 결제의 중복까지 제거된다는 답변.",
-        "followUp": "소비 위치를 업무 처리보다 먼저 커밋하면 어떤 문제가 생기나요?"
+        "pitfall": "모든 exactly-once가 불가능하다고 하거나 Kafka 보장을 임의 DB·외부 API에 자동 확대하지 않는다.",
+        "followUp": "외부 운송장 발급은 성공했지만 응답이 사라졌다면 어떻게 확인하나요?"
       }
     ]
   },
@@ -1802,6 +1818,60 @@
         ],
         "pitfall": "DNS가 되면 네트워크는 정상이고 Service 실패는 무조건 kube-proxy라는 답변.",
         "followUp": "노트북 Pod IP 호출 실패와 클러스터 내 Pod 호출 실패는 같은 증거인가요?"
+      }
+    ]
+  },
+  "backend-architecture-03-event-driven": {
+    "reviewedAt": "2026-09-13",
+    "scope": "본문과 기존 질문 3개 심층 검수. 설계 예제이며 실제 브로커·외부 API 장애 주입은 별도다.",
+    "sources": [
+      {
+        "label": "Microsoft: 도메인 이벤트 설계와 통합 이벤트 구분",
+        "url": "https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/domain-events-design-implementation"
+      },
+      {
+        "label": "Apache Avro 1.12 명세: Schema Resolution",
+        "url": "https://avro.apache.org/docs/1.12.0/specification/"
+      },
+      {
+        "label": "Saga 패턴과 조정 방식",
+        "url": "https://microservices.io/patterns/data/saga.html"
+      },
+      {
+        "label": "Kafka 4.1 전달·트랜잭션 설계",
+        "url": "https://kafka.apache.org/41/design/design/"
+      }
+    ],
+    "questions": [
+      {
+        "question": "Domain Event와 Integration Event의 차이를 **스키마 진화·전달 방식·결합도** 관점에서 설명하고, 내부 도메인 이벤트를 그대로 외부에 발행하면 어떤 문제가 생기는지 말해보세요.",
+        "points": [
+          "내부 도메인 협력과 외부 공개 계약을 구분하고 전달 매체 자체가 정의는 아님을 설명한다.",
+          "내부 객체 대신 안정된 외부 의미로 변환하고 업무 커밋과 발행 의도를 연결한다.",
+          "신구 Reader/Writer·기본값·단위·과거 데이터 재생을 검사한다."
+        ],
+        "pitfall": "필드 추가는 항상 호환된다고 단정하거나 버전 이름만으로 전환이 끝난다고 말하지 않는다.",
+        "followUp": "Avro에서 새 Reader의 추가 필드에 기본값이 없으면 과거 데이터는 어떻게 되나요?"
+      },
+      {
+        "question": "주문-재고-배송 흐름을 Choreography로 갈지 Orchestration으로 갈지 결정하는 기준을 제시하고, 실패 보상이 복잡해질수록 왜 Orchestration이 유리해지는지 설명해보세요.",
+        "points": [
+          "단계 개수 대신 보상·기한·상태 가시성·조직 소유권을 비교한다.",
+          "독립 구독과 분산된 흐름, 중앙 상태 머신과 조정자 복구 비용을 설명한다.",
+          "보상도 실패할 수 있는 새 업무 동작이며 중복 응답·타이머·결과 조회를 영속화한다."
+        ],
+        "pitfall": "Choreography에는 장애 의존성이 없거나 Orchestration은 반드시 단일 서버라고 단정하지 않는다.",
+        "followUp": "결제 취소 응답이 사라진 상태를 조정자 재시작 뒤 어떻게 복구하나요?"
+      },
+      {
+        "question": "운송장 `TrackingEvent`가 At-least-once로 전달되어 중복·순서 뒤바뀜이 발생할 수 있을 때, 컨슈머를 어떻게 설계해야 정확히 한 번 처리한 효과(Effectively once)를 낼 수 있는지 설명해보세요.",
+        "points": [
+          "논리 소비자와 eventId로 Inbox를 선점하고 업무 변경과 같은 DB 트랜잭션으로 묶는다.",
+          "전체 Delta 스트림에서 버전 누락은 보류·복구하고 Snapshot이나 필터 구독은 별도 계약으로 다룬다.",
+          "같은 Aggregate 파티션 키의 한계와 외부 효과·소비 위치·재생 기간을 설명한다."
+        ],
+        "pitfall": "큰 버전만 남기는 방식은 Delta 누락을 만들며 occurredAt은 권위 있는 전체 순서가 아니다.",
+        "followUp": "버전 15 다음에 17이 도착하면 Delta 소비자와 Snapshot 소비자는 각각 어떻게 하나요?"
       }
     ]
   }

@@ -17,200 +17,104 @@ questions:
   - "주문-재고-배송 흐름을 Choreography로 갈지 Orchestration으로 갈지 결정하는 기준을 제시하고, 실패 보상이 복잡해질수록 왜 Orchestration이 유리해지는지 설명해보세요."
   - "운송장 `TrackingEvent`가 At-least-once로 전달되어 중복·순서 뒤바뀜이 발생할 수 있을 때, 컨슈머를 어떻게 설계해야 정확히 한 번 처리한 효과(Effectively once)를 낼 수 있는지 설명해보세요."
 ---
-## 1. 왜 이벤트 기반인가 — 문제 → 해결
+## 1. 비동기는 시간 결합을 줄이지만 계약은 남는다
 
-**문제**: 주문 완료 후 재고차감·포인트적립·알림발송·정산을 동기 호출하면, 한 호출만 느려도/죽어도 주문 전체가 실패한다(시간 결합 Temporal coupling). 새 후속 작업이 생길 때마다 주문 코드를 고쳐야 한다.
+가상 주문 서비스가 주문 수락을 저장하고 알림·분석에 이벤트를 보내면 후속 처리 완료를 매번 기다릴 필요가 없다. 대신 고객에게 보여주는 상태와 실패 복구를 정의해야 한다. `OrderAccepted`가 결제·재고까지 확정됐다는 뜻인지 계약에 명시한다. 이벤트를 보냈다는 사실만으로 주문 전체가 성공한 것은 아니다.
 
-**해결**: 주문은 `OrderPlaced` 이벤트만 발행하고 떠난다. 관심 있는 컨슈머가 알아서 구독한다. **발행자는 소비자를 모른다** → 느슨한 결합과 확장성.
-
-```mermaid
-flowchart LR
-    subgraph SYNC["동기 호출 — 강결합"]
-      O1["Order"] --> Inv1["Inventory"]
-      O1 --> Pt1["Point"]
-      O1 --> Noti1["Notify"]
-    end
-    subgraph EVT["이벤트 기반 — 느슨한 결합"]
-      O2["Order"] -->|"OrderPlaced"| B[("Event Broker\nKafka")]
-      B --> Inv2["Inventory"]
-      B --> Pt2["Point"]
-      B --> Noti2["Notify"]
-      B -.->|"신규 컨슈머\n주문코드 수정 0"| Fraud["Fraud 분석"]
-    end
-
-    style SYNC fill:#fee2e2,stroke:#ef4444
-    style EVT fill:#dcfce7,stroke:#22c55e
-    style B fill:#ede9fe,stroke:#8b5cf6
-```
-
-*동기(좌)는 컨슈머 추가마다 발행자 수정. 이벤트(우)는 발행자 변경 없이 컨슈머만 늘린다.*
-
-> **💡 Trade-off**
->
-> 이벤트 기반은 결합도↓·확장성↑·장애 격리↑를 주지만, 대가로 **최종 일관성(Eventual Consistency)** , 흐름 추적 난이도↑, 디버깅 복잡도↑를 받는다. 강한 일관성이 필수인 곳(잔액 차감 즉시 반영 등)은 동기가 낫다.
-
-## 2. Event vs Command vs Query — 명확히 구분
-
-|  | Command(명령) | Event(이벤트) | Query(조회) |
-| --- | --- | --- | --- |
-| 의미 | "~을 해라" | "~이 일어났다"(사실) | "~을 알려달라" |
-| 시제 | 명령형 | **과거형** | 질문형 |
-| 수신자 | 1명 (특정) | 0~N명 (모름) | 1명 |
-| 거부 가능 | 가능 (검증 후 실패) | 불가 (이미 발생함) | 해당 없음 |
-| 예시 | `ReserveInventory` | `InventoryReserved` | `GetOrderStatus` |
-
-> **⚠️ 실무 함정 — Event와 Command 혼용**
->
-> 이벤트 이름을 `ReserveInventory` (명령형)로 지으면 발행자가 컨슈머의 행동을 지시하는 셈 → 결합이 다시 강해진다. 이벤트는 **과거의 사실** ( `OrderPlaced` )만 알리고, 무엇을 할지는 컨슈머가 결정해야 한다.
-
-## 3. Domain Event vs Integration Event
-
-둘 다 "과거의 사실"이지만 **범위와 계약(Contract)**이 다르다. 이 구분을 못 하면 내부 모델이 외부로 새어 강결합이 된다.
-
-|  | Domain Event (도메인 이벤트) | Integration Event (통합 이벤트) |
-| --- | --- | --- |
-| 범위 | 한 Bounded Context **내부** | 컨텍스트/서비스 **경계 간** |
-| 전달 | in-process (메모리 디스패처) | 메시지 브로커 (Kafka/SQS) |
-| 스키마 | 내부용, 자유롭게 변경 | **공개 계약** — 하위호환 필수 |
-| 내용 | 풍부한 도메인 객체 가능 | 최소·안정 필드 (ID 중심) |
-| 예시 | Order Aggregate가 발행한 `OrderPlaced` | 외부로 나가는 `order.placed.v1` |
+동기 API도 로컬 DB 트랜잭션 하나와 같지 않으며, 비동기 시스템 안에서도 잔액 차감 같은 불변 조건은 로컬 트랜잭션으로 지킬 수 있다. “동기면 강한 일관성, 이벤트면 무조건 안전한 장애 격리”로 분류하지 않는다. 느린 소비자는 적체와 보존 한도를 통해 결국 생산 측과 운영에 영향을 준다.
 
 ```mermaid
 flowchart LR
-    subgraph BC["Ordering 컨텍스트"]
-      AGG["Order Aggregate"] -->|"Domain Event\n(in-process)"| H["이벤트 핸들러"]
-      H -->|"번역 + 안정 스키마"| OUT["Integration Event\norder.placed.v1"]
-    end
-    OUT -->|"브로커"| K[("Kafka")]
-    K --> INV["Inventory 서비스"]
-    K --> SHIP["Shipping 서비스"]
-
-    style BC fill:#dbeafe,stroke:#3b82f6
-    style AGG fill:#fff,stroke:#3b82f6
-    style OUT fill:#dcfce7,stroke:#22c55e
-    style K fill:#ede9fe,stroke:#8b5cf6
+    A[주문 명령 검증] --> B[주문 수락과 Outbox 커밋]
+    B --> R[릴레이]
+    R --> E[통합 이벤트]
+    E --> N[알림 처리]
+    E --> P[조회 모델 갱신]
+    E --> M[분석 처리]
 ```
 
-*도메인 이벤트는 내부에서, 통합 이벤트는 안정된 공개 스키마로 번역해 밖으로. 내부 모델을 외부에 그대로 노출하지 마라.*
+새 소비자를 붙일 때 기존 이벤트로 필요한 의미·권한·데이터가 충족되면 생산자 수정 없이 확장할 수 있다. 필요한 정보가 없거나 새 공개 계약이 필요하면 생산자 변경도 발생한다.
 
-> **🎯 면접 포인트 — 스키마 진화**
->
-> 통합 이벤트는 **하위 호환(Backward compatibility)** 이 생명. 필드 추가는 OK, 삭제·의미 변경은 금지. `Schema Registry(Avro/Protobuf)` 와 버전 태깅( `v1` )으로 관리. `Consumer-Driven Contracts(Pact)` 로 컨슈머가 깨지지 않게 검증. 🔥(Deep-dive)
+## 2. 이벤트와 명령, 내부와 외부를 구분한다
 
-## 4. 이벤트 흐름 설계 — 물류 주문 파이프라인
+| 구분 | 의미 | 처리 실패의 해석 |
+|---|---|---|
+| Command | 특정 책임 주체에게 수행 요청 | 검증·업무 조건으로 거절 가능 |
+| Event | 이미 확정된 사실의 알림 | 소비는 실패·보류할 수 있으나 과거 사실 자체를 거절하는 것은 아님 |
+| Query | 현재 계약에 따른 정보 조회 | 조회 시점·가시성 범위를 명시 |
 
-주문이 들어오면 이벤트가 컨텍스트를 타고 흐른다. 각 컨슈머는 자기 일을 하고 다음 이벤트를 발행한다.
+Domain Event는 도메인 내부 협력을 표현하고 Integration Event는 경계 밖 소비자와의 계약을 표현한다. 메모리 디스패처와 브로커는 흔한 구현 선택이지 용어 자체의 필수 조건은 아니다. 내부 이벤트 처리 시점이 커밋 전인지 후인지에 따라 실패 의미도 달라진다.
 
-```mermaid
-sequenceDiagram
-    participant O as Ordering
-    participant K as Kafka
-    participant I as Inventory
-    participant F as Fulfillment
-    participant S as Shipping
-    participant N as Notification
+내부 객체를 그대로 직렬화하면 ORM 필드, 내부 이름, 개인정보가 외부 계약이 될 수 있다. 필요한 의미를 안정된 외부 스키마로 변환하고, 공개할 사건은 업무 커밋과 Outbox 기록을 연결한다. ID만 보내 추가 조회하게 할지, 당시 필요한 값을 함께 보낼지는 데이터 신선도·생산자 장애·페이로드 크기를 비교한다.
 
-    O->>K: OrderPlaced
-    K->>I: OrderPlaced 구독
-    I->>I: 재고 예약(Reserve)
-    I->>K: InventoryReserved
-    K->>F: InventoryReserved 구독
-    F->>F: 피킹/패킹
-    F->>K: PackagePrepared
-    K->>S: PackagePrepared 구독
-    S->>S: 운송장 발행
-    S->>K: ShipmentDispatched
-    K->>N: 각 이벤트 구독
-    N->>N: 고객 알림 발송
-```
+## 3. 스키마 호환은 방향과 의미를 함께 검사한다
 
-*물류 주문 이벤트 파이프라인 — 각 컨텍스트가 사실을 발행하고 다음이 반응한다(Choreography).*
+“필드 추가는 항상 안전”하지 않다. 예를 들어 Avro 1.12에서 새 Reader가 옛 Writer의 데이터를 읽는데 새 필드에 기본값이 없으면 해석이 실패할 수 있다. 새 소비자가 과거 데이터를 읽는 방향과 기존 소비자가 새 데이터를 읽는 방향을 나눠 검사한다. 실제 직렬화 형식과 Registry 호환 설정을 기준으로 판단한다.
 
-### 이벤트 설계 체크리스트
+가상 `quantity` 필드를 그대로 두고 단위를 개에서 박스로 바꾸면 문법 검사는 통과해도 업무 계약은 깨진다. 필드 이름·타입 검사 외에 단위·시간대·null 의미·상태 전이를 예제 데이터로 확인한다. 버전 이름만 붙여도 구독 전환과 과거 이벤트 재생이 자동 해결되지는 않는다.
 
-- **이벤트는 자기완결적**: 컨슈머가 매번 발행자에게 되묻지(콜백) 않아도 되게 필요한 ID·핵심 필드 포함.
-- **too fat / too thin 균형**: 전체 객체를 다 넣으면 결합·페이로드 비대, 너무 적으면 컨슈머가 추가 조회 폭주. 보통 ID + 핵심 필드.
-- **순서 보장 범위**: Kafka는 파티션 내 순서만 보장 → 같은 `orderId`는 같은 파티션 키로.
+| 변경 | 확인할 대상 |
+|---|---|
+| 선택 필드 추가 | 기본값·알 수 없는 필드 처리·구형 소비자 |
+| 필드 제거·타입 변경 | 신구 Reader/Writer 조합·저장된 과거 데이터 |
+| 단위·상태 의미 변경 | 업무 계약·계산·재처리 결과 |
+| 개인정보 추가 | 공개 범위·보존·삭제 요구 |
 
-## 5. Choreography vs Orchestration
+## 4. Choreography와 Orchestration의 선택
 
-여러 단계의 흐름을 누가 제어하는가의 문제. **Choreography(코레오그래피)**는 각자 이벤트를 듣고 자율적으로 반응, **Orchestration(오케스트레이션)**은 중앙 조정자가 단계를 지시한다.
+Choreography에서는 각 참여자가 사건에 반응하고, Orchestration에서는 조정자가 단계·명령·결과를 관리한다. 단계가 3개인지 4개인지로 선택하지 않는다. 보상·기한·상태 조회·담당 조직의 책임이 얼마나 얽혀 있는지가 중요하다.
 
-```mermaid
-flowchart TB
-    subgraph CHOREO["Choreography — 분산 자율"]
-      direction LR
-      A1["Order"] -->|"이벤트"| A2["Inventory"]
-      A2 -->|"이벤트"| A3["Shipping"]
-    end
-    subgraph ORCH["Orchestration — 중앙 조정"]
-      direction LR
-      ORCa(["Orchestrator"])
-      ORCa -->|"명령"| B1["Order"]
-      ORCa -->|"명령"| B2["Inventory"]
-      ORCa -->|"명령"| B3["Shipping"]
-      B1 -.->|"응답"| ORCa
-      B2 -.->|"응답"| ORCa
-      B3 -.->|"응답"| ORCa
-    end
+가상 주문 흐름에서 재고 예약 실패 시 결제를 취소하고, 취소 응답이 늦으면 결과를 조회해야 한다면 영속 상태 머신에 복구 정책을 모으는 방식이 유용하다. 조정자도 재시작·중복 응답·타이머 재실행을 견디게 설계해야 한다. 논리적으로 중앙인 조정자가 반드시 단일 프로세스일 필요는 없다.
 
-    style CHOREO fill:#dcfce7,stroke:#22c55e
-    style ORCH fill:#dbeafe,stroke:#3b82f6
-    style ORCa fill:#fff,stroke:#3b82f6
-```
+| 선택 관점 | Choreography | Orchestration |
+|---|---|---|
+| 후속 알림·분석처럼 독립 반응 | 구독으로 확장하기 쉬움 | 중앙 흐름에 불필요한 지식이 모일 수 있음 |
+| 긴 기한·분기·보상 순서 | 여러 서비스에 상태가 흩어짐 | 상태·재시도·담당 지점을 모으기 쉬움 |
+| 장애 의존성 | 브로커·공유 계약·순환 흐름 점검 | 조정자 저장소·복구·병목 점검 |
 
-*Choreography는 결합도 낮지만 흐름이 코드에 흩어진다. Orchestration은 흐름이 한곳에 보이지만 조정자가 핵심 지점.*
+보상은 과거 커밋을 지우는 DB 롤백이 아니라 새로운 업무 동작이다. 이미 고객에게 전달된 알림이나 출고된 실물은 단순 역연산으로 복원되지 않는다. 반품·정정·수동 처리 상태를 구분한다.
 
-| 관점 | Choreography | Orchestration |
-| --- | --- | --- |
-| 결합도 | **낮음** (서로 모름) | 중간 (조정자가 다 앎) |
-| 흐름 가시성 | 낮음 (전체 추적 어려움) | **높음** (한곳에 정의) |
-| 단일 지점 | 없음 | 조정자 (장애·병목 가능) |
-| 적합 상황 | 단계 적고 자율적, 느슨한 흐름 | 단계 많고 복잡, 보상·롤백 필요 |
-| 디버깅 | 어려움 (분산 추적 필수) | 쉬움 (상태 머신 추적) |
+## 5. TrackingEvent의 중복과 순서 역전
 
-> **💡 선택 기준**
->
-> 단계가 **2~3개로 단순** 하면 Choreography. **4단계 이상 + 실패 보상이 복잡** (주문-결제-재고-배송 + 각 단계 롤백)하면 Orchestration이 흐름 가시성에서 유리. 이게 다음 장(04 Saga)의 두 변형으로 직결된다.
-
-## 6. 전달 보장과 함정
-
-| 전달 의미론 | 의미 | 현실 |
-| --- | --- | --- |
-| At-most-once | 최대 1번 (유실 가능) | 중요 이벤트에 부적합 |
-| At-least-once | 최소 1번 (중복 가능) | **표준** — 중복은 멱등성으로 흡수 |
-| Exactly-once processing | 정의된 경계 안에서 한 번 실행한 결과 | 트랜잭션·중복 제거·소비 위치를 함께 관리하며 외부 효과는 별도 설계 |
-
-> **⚠️ 실무 함정 — DB 커밋 후 이벤트 발행**
->
-> "주문 저장 → 그 다음 줄에서 Kafka 발행"은 위험하다. 저장 후 발행 직전에 프로세스가 죽으면 **이벤트 유실** (Dual-write 문제). 반대로 발행 후 커밋 실패면 **유령 이벤트** . 해결은 `Transactional Outbox(트랜잭셔널 아웃박스)` — DB 트랜잭션과 이벤트 적재를 원자화. 06장에서 깊게 다룬다. 🔥(Deep-dive)
-
-> **🎯 면접 포인트**
->
-> "이벤트가 중복으로 오면?" → 컨슈머를 **멱등(Idempotent)** 하게 설계. 운송장 `TrackingEvent` 가 여러 경로로 중복 수신되어도 같은 `eventId` 를 이미 처리했으면 무시(Inbox 패턴). At-least-once + 멱등 컨슈머 = Effectively once.
-
-## 7. 실제 사례
-
-| 회사 | 이벤트 활용 |
-| --- | --- |
-| **우아한형제들(배민)** | 주문 도메인을 Kafka 이벤트로 결제·정산·배달대행에 전파. 주문 발생 시 다수 컨슈머가 비동기 반응 |
-| **쿠팡** | 풀필먼트·물류 상태 변화를 이벤트 스트림으로 — 수천만 건/일 TrackingEvent fan-out에 Kafka + CDC |
-| **토스** | 금융 이벤트를 비동기로 처리하되 핵심 트랜잭션은 동기 강일관성 유지 (혼합 전략) |
-| **Netflix** | 대규모 이벤트 파이프라인 + 스트림 처리로 추천·시청 로그 처리 |
-| **Uber** | 배차·결제·위치 업데이트를 이벤트 기반으로, Orchestration(Cadence/Temporal) 활용 |
-
-> **💡 물류 맥락**
->
-> 운송장 상태 변화( `PickedUp` → `InTransit` → `Delivered` )는 이벤트 기반의 교과서. 기사 앱 오프라인 동기화·중복 스캔 때문에 **멱등 + 순서 키(orderId 파티셔닝)** 가 필수다.
+아래는 특정 기업의 구현이 아닌 가상 이벤트 계약이다. `aggregateVersion`은 해당 운송장의 권위 있는 기록 주체가 할당한다. 여러 오프라인 단말의 로컬 시각을 전체 순서로 사용하지 않는다.
 
 ```json
 {
-  "eventId": "01J...",
+  "eventId": "tracking-42-v17",
   "aggregateId": "waybill-42",
   "aggregateVersion": 17,
   "type": "Delivered",
-  "occurredAt": "2026-08-20T09:00:00Z"
+  "schemaVersion": 1,
+  "occurredAt": "2026-09-13T01:00:00Z"
 }
 ```
 
-> **부분 검수 — 2026-09-12**: 전달 횟수와 관측 가능한 처리 결과를 구분했다. [Kafka 4.1 Design](https://kafka.apache.org/41/design/design/)의 트랜잭션 보장을 “분산 환경이므로 모두 불가능”으로 부정하지 않는다. 기업별 도입 사례는 후속 출처 검수 대상이다.
+가상 소비자가 모든 버전의 **상태 변화 이벤트**를 구독하고 현재 버전이 15라고 가정한다.
+
+| 도착 이벤트 | 처리 |
+|---|---|
+| 이미 처리한 eventId | Inbox로 업무 재실행 차단 |
+| 버전 17이 먼저 도착 | 16의 누락을 기록하고 보류·재조회 |
+| 버전 16 도착 | 허용된 상태 전이 확인 후 적용하고 17 재개 |
+| 같은 버전, 다른 내용 | 충돌·정정 계약 확인, 조용히 덮어쓰지 않음 |
+
+> **면접에서 짚을 전제**
+>
+> 모든 이벤트를 구독하지 않는 소비자에게 연속 버전을 강제하면 정상적인 필터링도 누락으로 보인다. 완전한 상태 Snapshot을 받는 계약이라면 최신 버전으로 교체하는 정책이 가능하다. 반대로 “수량 1 증가” 같은 Delta는 버전이 크다는 이유로 중간 이벤트를 버리면 안 된다.
+
+Inbox 선점과 상태 변경은 같은 소비 DB 트랜잭션으로 묶고 실패하면 함께 롤백한다. 외부 알림·운송장 발급은 별도 의도 기록과 외부 멱등 계약이 필요하다. Kafka의 같은 Aggregate 키는 파티션 순서를 돕지만 생산 전 역전, 파티션 변경, 소비자의 병렬 완료 순서까지 자동 해결하지 않는다.
+
+## 6. 재처리 가능한 흐름으로 운영한다
+
+재시도할 일시 오류와 스키마·업무 충돌을 구분한다. DLQ로 옮겼다는 이유로 해결 완료가 되지는 않는다. 원문 식별자, 실패 이유, 재생 범위와 담당자를 남기고 복구 후 업무 상태를 대조한다. 보류 이벤트를 저장했다면 그 보관과 재개 역시 내구성 있는 작업으로 관리한다.
+
+전달 시도는 반복될 수 있다. Kafka 트랜잭션은 정의된 Kafka 입출력 경계에서 한 번 반영한 결과를 제공할 수 있지만 임의 외부 효과를 자동 포함하지 않는다. 면접 답변에서는 중복 키·트랜잭션·소비 위치·재생 기간·순서 정책을 함께 설명한다.
+
+유입률·처리율·최고 지연·가장 오래된 미처리 시각·상태별 미완료 건수를 본다. 이 문서의 예제는 설계 검수이며 실제 브로커 장애나 기업 운영 실적을 재현한 결과가 아니다.
+
+## 참고 자료
+
+- [Microsoft: 도메인 이벤트 설계와 통합 이벤트 구분](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/domain-events-design-implementation)
+- [Apache Avro 1.12 명세: Schema Resolution](https://avro.apache.org/docs/1.12.0/specification/)
+- [Saga 패턴과 조정 방식](https://microservices.io/patterns/data/saga.html)
+- [Kafka 4.1 전달·트랜잭션 설계](https://kafka.apache.org/41/design/design/)

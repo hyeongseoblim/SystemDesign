@@ -2,18 +2,18 @@
 
 ## 점검 범위와 판정 원칙
 
-저장소의 수동 카드 129개 전체에 대해 프론트매터·목차·본문 구조·출처 링크·질문별 해설 연결을 조사했다. 이는 운영 DB 전수 조회나 129개 전체 문장의 사실 검증을 완료했다는 뜻이 아니다. **30개는 본문·질문 3개를 대조해 심층 보강했고, 5개는 확인한 오류 구간만 정정했다. 나머지 94개는 구조 점검 상태**로 남긴다. 기존 10개 해설의 과거 검수와 이번 검수도 구분한다.
+저장소의 수동 카드 129개 전체에 대해 프론트매터·목차·본문 구조·출처 링크·질문별 해설 연결을 조사했다. 이는 운영 DB 전수 조회나 129개 전체 문장의 사실 검증을 완료했다는 뜻이 아니다. **32개는 본문·질문 3개를 대조해 심층 보강했고, 3개는 확인한 오류 구간만 정정했다. 나머지 94개는 구조 점검 상태**로 남긴다. 기존 10개 해설의 과거 검수와 이번 검수도 구분한다.
 
 분량 2,000자는 보강 후보를 찾는 신호이며 합격 기준이 아니다. 긴 본문이나 참고 링크 하나가 정확성·완결성을 보장하지 않는다. 특히 외부 링크가 있어도 모든 기업 사례·수치가 그 출처에서 확인됐다고 간주하지 않는다. 모드별로 DESIGN은 요구·용량·데이터·실패·대안, INTERVIEW는 질문별 근거와 후속 압박, REVIEW는 문제 코드·반례·수정·검증을 확인해야 한다.
 
 ## 전체 기준선
 
-변경 전 본문 2,000자 미만 67개, 본문 HTTPS 출처가 있는 카드 23개, 질문별 점검 해설 10개/30문항이었다. 이번 변경은 카드 수를 늘리지 않고 본문 35개를 수정하고 신규 해설 27개/81문항을 추가했으며 기존 해설 3개/9문항도 갱신했다. 기존 카드의 slug·메타데이터·질문 순서·질문 문구는 변경하지 않았다.
+변경 전 본문 2,000자 미만 67개, 본문 HTTPS 출처가 있는 카드 23개, 질문별 점검 해설 10개/30문항이었다. 이번 변경은 카드 수를 늘리지 않고 본문 35개를 수정하고 신규 해설 28개/84문항을 추가했으며 기존 해설 3개/9문항도 갱신했다. 기존 카드의 slug·메타데이터·질문 순서·질문 문구는 변경하지 않았다.
 
 | 영역 | 카드 | 본문 2,000자 미만(변경 후) | 본문 출처 있음 | 질문별 해설 있음 |
 |---|---:|---:|---:|---:|
 | AI | 15 | 15 | 8 | 1 |
-| BACKEND_ARCHITECTURE | 15 | 7 | 5 | 4 |
+| BACKEND_ARCHITECTURE | 15 | 7 | 5 | 5 |
 | BACKEND_DEV | 15 | 8 | 7 | 4 |
 | CS | 11 | 5 | 1 | 0 |
 | DATABASE | 15 | 6 | 7 | 4 |
@@ -158,10 +158,10 @@ PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시�
 | [backend-15-file-streaming-design](../apps/api/src/main/resources/content/backend-15-file-streaming-design.md) | DESIGN · 4 | 1,047 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
 | [backend-architecture-01-msa-vs-monolith](../apps/api/src/main/resources/content/backend-architecture-01-msa-vs-monolith.md) | CONCEPT · 3 | 7,182 | 부분 정정 | 출처 없는 지연·인력 배수 제거; 기업 사례는 후속 검수 |
 | [backend-architecture-02-ddd](../apps/api/src/main/resources/content/backend-architecture-02-ddd.md) | CONCEPT · 3 | 7,025 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 |
-| [backend-architecture-03-event-driven](../apps/api/src/main/resources/content/backend-architecture-03-event-driven.md) | CONCEPT · 3 | 6,468 | 부분 정정 | exactly-once 불가능 단정 정정; 기업 사례는 후속 검수 |
+| [backend-architecture-03-event-driven](../apps/api/src/main/resources/content/backend-architecture-03-event-driven.md) | CONCEPT · 3 | 4,183 | 심층 보강 | 스키마 호환 방향·흐름 소유권·Delta/Snapshot·버전 누락과 재처리 |
 | [backend-architecture-04-saga](../apps/api/src/main/resources/content/backend-architecture-04-saga.md) | CONCEPT · 4 | 5,569 | 심층 보강 | 2PC 경계·Pivot·외부 결제 명령·상태/Outbox 원자성 |
 | [backend-architecture-05-cqrs-event-sourcing](../apps/api/src/main/resources/content/backend-architecture-05-cqrs-event-sourcing.md) | CONCEPT · 4 | 5,712 | 구조 점검 | 본문 출처 없음 / 점검 해설 없음 / 기업 언급 출처 확인 |
-| [backend-architecture-06-outbox-idempotency](../apps/api/src/main/resources/content/backend-architecture-06-outbox-idempotency.md) | CONCEPT · 4 | 8,018 | 부분 정정 | 유실 0·exactly-once 전제 정정; 기존 질문의 생략 전제를 본문에 명시 |
+| [backend-architecture-06-outbox-idempotency](../apps/api/src/main/resources/content/backend-architecture-06-outbox-idempotency.md) | CONCEPT · 4 | 4,238 | 심층 보강 | 장애 시점·eventId/파티션 키·Inbox 분기·외부 API 결과 불명 |
 | [backend-architecture-07-interview-saga](../apps/api/src/main/resources/content/backend-architecture-07-interview-saga.md) | INTERVIEW · 4 | 5,268 | 심층 보강 | 보상 미해결 관리·외부/로컬/전달 경계·집하/반품 4라운드 |
 | [backend-architecture-08-aggregate-boundary](../apps/api/src/main/resources/content/backend-architecture-08-aggregate-boundary.md) | CONCEPT · 4 | 1,948 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
 | [backend-architecture-09-aggregate-reference](../apps/api/src/main/resources/content/backend-architecture-09-aggregate-reference.md) | CONCEPT · 4 | 1,601 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
@@ -255,3 +255,9 @@ PostgreSQL 동시 세션은 9월 13일 임시 로컬 18.4에서 아래 4개 시�
 | [system-design-24-storage-index-interview](../apps/api/src/main/resources/content/system-design-24-storage-index-interview.md) | INTERVIEW · 5 | 878 | 구조 점검 | 짧은 본문 / 본문 출처 없음 / 점검 해설 없음 |
 | [system-design-25-transaction-isolation](../apps/api/src/main/resources/content/system-design-25-transaction-isolation.md) | CONCEPT · 5 | 3,494 | 심층 보강 | 두 세션 재현, 업무 조건 검사, SSI·전체 재시도 |
 | [system-design-26-message-queue-selection](../apps/api/src/main/resources/content/system-design-26-message-queue-selection.md) | DESIGN · 4 | 3,390 | 심층 보강 | Queue·Stream·Standard·FIFO 구분, 처리율 단위, 순서 복구 |
+
+## 2026-09-13 이벤트·Outbox 후속 심층 검수
+
+기존 부분 정정 2개를 심층 검수로 전환했다. 출처 없는 기업 사례·무조건 유실율 0·단계 수만으로 조정 방식 선택·필드 추가 무조건 호환 설명을 제거했다. 실패 복구 표, 이벤트 ID/파티션 키 구분, 버전 누락과 Snapshot/Delta 계약, 외부 API 결과 불명 처리를 보강했다.
+
+누적 심층 32개·부분 3개, 해설 38개/114문항이다. 본문을 변경한 고유 카드 수는 35개로 동일하다. V11에 후속 본문을 분리하고 배포된 V9/V10은 유지한다. 실제 Kafka·CDC·외부 API 장애 주입은 수행하지 않았다.
